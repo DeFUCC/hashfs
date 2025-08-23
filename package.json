@@ -13,6 +13,7 @@
 	"engines": {
 		"node": "22"
 	},
+	
 	"scripts": {
 		"dev": "vite --host",
 		"build": "vite build --emptyOutDir",
@@ -43,6 +44,12 @@
 		"vite": "^7.1.3",
 		"vite-plugin-singlefile": "^2.3.0"
 	},
+	"main": "./lib/index.js",
+	"module": "./lib/index.js",
+	"exports": "./lib/index.js",
+	"files": [
+		"lib/"
+	],
 	"pnpm": {
 		"onlyBuiltDependencies": [
 			"bufferutil",
