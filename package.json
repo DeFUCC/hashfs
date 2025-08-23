@@ -1,0 +1,55 @@
+{
+	"name": "hashfs",
+	"version": "0.0.1",
+	"description": "Content-addressed secure file storage in a browser tab",
+	"type": "module",
+	"homepage": "https://github.com/davay42/hashfs",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/davay42/hashfs.git"
+	},
+	"author": "davay42 <davay@defucc.me>",
+	"packageManager": "pnpm@10.15.0",
+	"engines": {
+		"node": "22"
+	},
+	"scripts": {
+		"dev": "vite --host",
+		"build": "vite build --emptyOutDir",
+		"lib": "vite build --config vite.config.lib.js --emptyOutDir",
+		"preview": "vite preview --host"
+	},
+	"dependencies": {
+		"@noble/curves": "^1.9.7",
+		"@scure/bip39": "^1.6.0",
+		"@unocss/reset": "^66.4.2",
+		"@vue/compiler-sfc": "^3.5.19",
+		"@vueuse/core": "^13.7.0",
+		"fflate": "^0.8.2",
+		"gun-avatar": "^2.2.4",
+		"idb": "^8.0.3",
+		"marked": "^16.2.0",
+		"marked-highlight": "^2.2.2",
+		"vue": "3.6.0-alpha.2",
+		"webtorrent": "^2.8.4"
+	},
+	"devDependencies": {
+		"@iconify-json/lucide": "^1.2.63",
+		"@unocss/extractor-pug": "^66.4.2",
+		"@vitejs/plugin-vue": "^6.0.1",
+		"@vue/language-plugin-pug": "^3.0.6",
+		"pug": "^3.0.3",
+		"unocss": "^66.4.2",
+		"vite": "^7.1.3",
+		"vite-plugin-singlefile": "^2.3.0"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"bufferutil",
+			"esbuild",
+			"node-datachannel",
+			"utf-8-validate",
+			"utp-native"
+		]
+	}
+}

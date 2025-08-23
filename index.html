@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<title>HashFS</title>
+
+	<link rel="manifest" href="/manifest.json" />
+
+	<meta name="description" content="Content-addressed secure file storage in a browser tab" />
+	<meta name="keywords" content="hash, " />
+	<meta name="theme-color" content="#993300" />
+	<meta charset="UTF-8" />
+	<link rel="icon" href="/icon.svg" sizes="any" type="image/svg+xml" />
+	<link rel="mask-icon" href="/icon.svg" color="#993300" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+	<link rel="apple-touch-icon" href="/icon512.png">
+
+	<!-- Apple specific -->
+	<meta name="mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+	<!-- Open Graph / Facebook -->
+	<meta property="og:type" content="website" />
+	<meta property="og:title" content="HashFS" />
+	<meta property="og:description" content="Content-addressed secure file storage in a browser tab" />
+	<meta property="og:image" content="./icon512.png" />
+
+	<!-- Twitter -->
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:site" content="@davay42" />
+	<meta name="twitter:creator" content="@davay42" />
+	<meta name="twitter:title" content="HashFS" />
+	<meta name="twitter:description" content="Content-addressed secure file storage in a browser tab" />
+	<meta name="twitter:image" content="./media/preview.png" />
+	<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e5e5">
+	<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#191919">
+
+</head>
+
+<body>
+	<div id="app"></div>
+	<script type="module">
+
+		import { createApp, vaporInteropPlugin } from "vue";
+		import App from "./App.vue";
+
+		import '@unocss/reset/tailwind.css'
+		import 'uno.css'
+
+		const app = createApp(App)
+
+		app.use(vaporInteropPlugin)
+
+		app.mount("#app");
+
+	</script>
+</body>
+
+</html>
