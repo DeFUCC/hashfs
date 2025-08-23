@@ -14,6 +14,7 @@ const dirname = path.dirname(filename);
 
 export default defineConfig({
 	build: {
+		copyPublicDir: false,
 		lib: {
 			entry: ['index.js'],
 			formats: ['es']
