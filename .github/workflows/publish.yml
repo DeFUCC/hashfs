@@ -70,8 +70,7 @@ jobs:
           asset_name: index.js
           asset_content_type: application/javascript
 
-      - name: Publish 
+      - name: Publish
         run: npm publish --provenance --access public
-        continue-on-error: true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
