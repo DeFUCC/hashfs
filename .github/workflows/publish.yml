@@ -34,7 +34,7 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Build project
-        run: pnpm run build
+        run: pnpm run lib
 
       - name: Create Release Draft
         id: create_release
