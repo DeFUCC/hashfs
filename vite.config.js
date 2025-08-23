@@ -77,7 +77,7 @@ function addServiceWorkerScript() {
 			if (process.env.NODE_ENV === 'production') {
 				return html.replace('</head>', `          
 	<script>
-    'serviceWorker' in navigator && window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js')});
+    'serviceWorker' in navigator && window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js')});
   </script>
 	</head>
 	`);
