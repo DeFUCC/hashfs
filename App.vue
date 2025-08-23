@@ -26,7 +26,7 @@ watch(passphrase, (val) => {
 </script>
 
 <template lang="pug">
-.font-mono.max-w-55ch.mx-auto.pt-20.flex.flex-col.gap-4
+.font-mono.mx-auto.pt-20.flex.flex-col.gap-4
   .p-4.text-center.flex.flex-col.gap-2(v-if="!passphrase")
     .text-2xl HashFS
     .text-lg Enter a passphrase to enter your vault

@@ -11,6 +11,9 @@ importers:
       '@noble/curves':
         specifier: ^1.9.7
         version: 1.9.7
+      '@noble/hashes':
+        specifier: ^1.8.0
+        version: 1.8.0
       '@scure/bip39':
         specifier: ^1.6.0
         version: 1.6.0

@@ -1,6 +1,6 @@
 {
 	"name": "hashfs",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"description": "Content-addressed secure file storage in a browser tab",
 	"type": "module",
 	"homepage": "https://github.com/davay42/hashfs",
@@ -13,7 +13,6 @@
 	"engines": {
 		"node": "22"
 	},
-	
 	"scripts": {
 		"dev": "vite --host",
 		"build": "vite build --emptyOutDir",
@@ -22,6 +21,7 @@
 	},
 	"dependencies": {
 		"@noble/curves": "^1.9.7",
+		"@noble/hashes": "^1.8.0",
 		"@scure/bip39": "^1.6.0",
 		"@unocss/reset": "^66.4.2",
 		"@vue/compiler-sfc": "^3.5.19",

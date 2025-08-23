@@ -3,10 +3,90 @@ import { openDB } from 'idb';
 import { deflate, inflate } from 'fflate';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
+import { sha256 } from '@noble/hashes/sha256.js';
+import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
+import { randomBytes } from '@noble/hashes/utils.js';
 
-const encoder = new TextEncoder()
-const decoder = new TextDecoder()
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
+// Crypto utilities - centralized and optimized
+export const cryptoUtils = {
+  // Check if Web Crypto API is available
+  get isSecureContext() {
+    return typeof window !== 'undefined' &&
+      window.isSecureContext &&
+      typeof window.crypto?.subtle !== 'undefined';
+  },
+
+  async deriveKeys(pwd) {
+    if (!this.isSecureContext) {
+      throw new Error('Secure context required. Please use HTTPS or localhost.');
+    }
+
+    const pwdBytes = encoder.encode(String(pwd || '').normalize('NFC').trim());
+    if (pwdBytes.length < 8) throw new Error('Password too short');
+
+    // Use @noble/hashes for consistent, auditable PBKDF2
+    const salt = encoder.encode('hashfs-v3-2025');
+    const masterKey = pbkdf2(sha256, pwdBytes, salt, { c: 120000, dkLen: 64 });
+
+    // Derive keys from master key
+    const sigKey = masterKey.slice(0, 32);
+    const encKeyBytes = masterKey.slice(32, 64);
+    const pubKey = ed25519.getPublicKey(sigKey);
+
+    // WebCrypto AES key for performance
+    const encKey = await window.crypto.subtle.importKey(
+      'raw', encKeyBytes, 'AES-GCM', false, ['encrypt', 'decrypt']
+    );
+
+    // Database name from public key hash
+    const dbName = bytesToHex(sha256(pubKey).slice(0, 16));
+
+    return {
+      sigKey,
+      pubKey,
+      encKey,
+      dbName,
+      sign: (hash) => bytesToHex(ed25519.sign(hexToBytes(hash), sigKey)),
+      verify: (hash, sig) => {
+        try { return ed25519.verify(hexToBytes(sig), hexToBytes(hash), pubKey); }
+        catch { return false; }
+      }
+    };
+  },
+
+  hash: (bytes) => bytesToHex(sha256(bytes)),
+
+  async encrypt(bytes, key) {
+    if (!this.isSecureContext) {
+      throw new Error('Encryption requires secure context');
+    }
+
+    const iv = randomBytes(12);
+    const encrypted = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes);
+    return { iv, data: new Uint8Array(encrypted) };
+  },
+
+  async decrypt(payload, key) {
+    if (!this.isSecureContext) {
+      throw new Error('Decryption requires secure context');
+    }
+
+    return new Uint8Array(await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: payload.iv }, key, payload.data
+    ));
+  }
+};
+
+// Compression utilities
+const compress = {
+  deflate: (bytes) => new Promise((resolve, reject) =>
+    deflate(bytes, (err, result) => err ? reject(err) : resolve(result))),
+  inflate: (bytes) => new Promise((resolve, reject) =>
+    inflate(bytes, (err, result) => err ? reject(err) : resolve(result)))
+};
 
 export function useHashFS(passphrase) {
   const auth = ref(false);
@@ -14,558 +94,388 @@ export function useHashFS(passphrase) {
   const db = ref(null);
   const loading = ref(false);
 
-  const filesMeta = ref({});
-  const currentFile = ref('');
-  const currentMime = ref('text/markdown');
-  const contentBytes = ref(new Uint8Array());
-  const dirty = ref(false);
+  const files = ref({});
+  const current = ref({ name: '', mime: 'text/markdown', bytes: new Uint8Array(), dirty: false });
 
-  const filesList = computed(() => {
-    return Object.entries(filesMeta.value)
-      .map(([name, meta]) => {
-        // Use head for latest
-        let latest = {};
-        if (meta && meta.head && Array.isArray(meta.versions)) {
-          latest = meta.versions.find(v => v.v === meta.head.v) || {};
-        } else if (Array.isArray(meta?.versions) && meta.versions.length) {
-          latest = meta.versions[meta.versions.length - 1];
-        }
-        return {
-          name,
-          mime: meta.mime || 'text/markdown',
-          versions: meta.head?.v || 0,
-          size: latest?.sizes?.original || 0,
-          modified: latest?.ts || 0,
-          active: currentFile.value === name,
-          hash: (meta.head?.hash) || latest.hash || null
-        };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
-  });
+  let saveTimer = null;
+  const scheduleAutoSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveFile, 800);
+  };
+
+  const filesList = computed(() =>
+    Object.entries(files.value).map(([name, meta]) => {
+      const latest = meta.versions[meta.versions.length - 1] || {};
+      return {
+        name,
+        mime: meta.mime || 'text/markdown',
+        versions: meta.versions.length,
+        size: latest.size || 0,
+        modified: latest.ts || 0,
+        active: current.value.name === name
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name))
+  );
 
   const contentText = computed({
-    get() {
-      try {
-        return decoder.decode(contentBytes.value || new Uint8Array());
-      } catch { return ''; }
+    get: () => {
+      try { return decoder.decode(current.value.bytes); }
+      catch { return ''; }
     },
-    set(text) {
-      contentBytes.value = encoder.encode(text || '');
-      dirty.value = true;
+    set: (text) => {
+      current.value.bytes = encoder.encode(text || '');
+      current.value.dirty = true;
       scheduleAutoSave();
     }
   });
 
-  // Auto-save timer
-  let saveTimer = null;
-  function scheduleAutoSave() {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => saveFile(), 800);
-  }
-
   async function login() {
     if (!String(passphrase || '').trim()) return;
+
+    // Check for secure context first
+    if (!cryptoUtils.isSecureContext) {
+      throw new Error('Secure context required. Please use HTTPS or localhost.');
+    }
+
     loading.value = true;
+
     try {
-      keys.value = await crypto.deriveKeys(passphrase);
+      keys.value = await cryptoUtils.deriveKeys(passphrase);
 
-      // Use versioned, non-destructive upgrades with lifecycle handlers
-      db.value = await openDB(keys.value.dbName, 2, {
-        async upgrade(dbx, oldVersion, newVersion, tx) {
-          console.log('Upgrading DB from version', oldVersion, 'to', newVersion);
-
-          // v1: ensure stores exist; migrate legacy 'metadata' -> 'meta' if present
-          if (oldVersion < 1) {
-            if (!dbx.objectStoreNames.contains('files')) {
-              console.log('Creating files store');
-              dbx.createObjectStore('files');
-            }
-            if (!dbx.objectStoreNames.contains('meta')) {
-              console.log('Creating meta store');
-              dbx.createObjectStore('meta');
-            }
-          }
-
-          // v2: optional migration from legacy 'metadata' store name
-          if (dbx.objectStoreNames.contains('metadata')) {
-            try {
-              if (!dbx.objectStoreNames.contains('meta')) {
-                dbx.createObjectStore('meta');
-              }
-              const legacy = tx.objectStore('metadata');
-              const modern = tx.objectStore('meta');
-              const legacyIndex = await legacy.get('index');
-              if (legacyIndex) {
-                await modern.put(legacyIndex, 'index');
-              }
-              dbx.deleteObjectStore('metadata');
-              console.log('Migrated legacy metadata -> meta');
-            } catch (e) {
-              console.warn('Metadata migration issue:', e);
-            }
-          }
-        },
-        blocked(currentVersion, blockedVersion, event) {
-          console.warn('DB open blocked by another tab/session', { currentVersion, blockedVersion });
-          console.log('Database upgrade is blocked by another open tab. Please close other tabs using this app.');
-        },
-        blocking(currentVersion, blockedVersion, event) {
-          console.warn('This tab is blocking a newer version from opening elsewhere', { currentVersion, blockedVersion });
-          console.log('A newer version of this app is trying to open the database. This tab will close its connection soon.');
-        },
-        terminated() {
-          console.error('Database connection unexpectedly terminated');
-          console.log('Database connection was terminated (likely due to system conditions). Reload the page.');
+      db.value = await openDB(keys.value.dbName, 1, {
+        upgrade(db) {
+          if (!db.objectStoreNames.contains('files')) db.createObjectStore('files');
+          if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
         }
       });
 
-      console.log('DB opened successfully, stores:', Array.from(db.value.objectStoreNames));
-
-      // React to external upgrades: close and ask user to reload
-      try {
-        db.value.addEventListener?.('versionchange', () => {
-          try { db.value.close(); } catch { }
-          console.log('Database was upgraded in another tab. Please reload this page.');
-        });
-      } catch { }
-
-      // Load metadata
+      // Load and decrypt metadata
       try {
         const encrypted = await db.value.get('meta', 'index');
         if (encrypted) {
-          const jsonBytes = await crypto.decryptToBytes(encrypted, keys.value.encKey);
-          filesMeta.value = JSON.parse(decoder.decode(jsonBytes)) || {};
+          const decrypted = await cryptoUtils.decrypt(encrypted, keys.value.encKey);
+          files.value = JSON.parse(decoder.decode(decrypted)) || {};
         }
       } catch (e) {
-        console.warn('Could not load metadata:', e);
-        filesMeta.value = {};
+        console.warn('Metadata load failed:', e);
+        files.value = {};
       }
 
-      // Migrate metadata in-memory to add version numbers and head pointer
-      let migrated = false;
-      for (const [name, meta] of Object.entries(filesMeta.value)) {
-        meta.versions = Array.isArray(meta.versions) ? meta.versions : [];
-        // Assign version numbers if missing
-        if (meta.versions.length && !('v' in meta.versions[0])) {
-          // Sort by timestamp ascending as best-effort ordering
-          meta.versions.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-          let v = 1;
-          for (const entry of meta.versions) {
-            entry.v = v++;
-          }
-          migrated = true;
-        }
-        // Ensure versions sorted by v ascending
-        if (meta.versions.length) {
-          meta.versions.sort((a, b) => (a.v || 0) - (b.v || 0));
-        }
-        // Ensure head and nextVersion
-        const last = meta.versions.length ? meta.versions[meta.versions.length - 1] : null;
-        if (!meta.head && last) {
-          meta.head = { v: last.v, hash: last.hash, key: last.key };
-          migrated = true;
-        }
-        if (typeof meta.nextVersion !== 'number') {
-          meta.nextVersion = last ? (last.v + 1) : 1;
-          migrated = true;
-        }
-      }
-      if (migrated) await saveMetadata();
-
-      // Cleanup pass: prune orphan file blobs, repair meta inconsistencies, cap versions
-      try {
-        const changed = await cleanupConsistency();
-        if (changed) await saveMetadata();
-      } catch (e) {
-        console.warn('Cleanup pass failed:', e);
-      }
-
+      // Cleanup orphaned data
+      await cleanup();
       auth.value = true;
+
     } catch (e) {
-      alert('Authentication failed: ' + e.message);
+      throw new Error('Authentication failed: ' + e.message);
     } finally {
       loading.value = false;
     }
   }
 
   async function saveMetadata() {
-    const jsonBytes = encoder.encode(JSON.stringify(filesMeta.value || {}));
-    const encrypted = await crypto.encryptBytes(jsonBytes, keys.value.encKey);
+    const bytes = encoder.encode(JSON.stringify(files.value));
+    const encrypted = await cryptoUtils.encrypt(bytes, keys.value.encKey);
     await db.value.put('meta', encrypted, 'index');
   }
 
-  // Cleanup: ensure consistency between 'files' blobs and 'meta' references
-  // - Delete orphan blobs not referenced by any meta entry
-  // - Drop meta versions whose blobs are missing
-  // - Recompute head and nextVersion
-  // Returns: true if metadata was changed
-  async function cleanupConsistency() {
-    let changed = false;
-
-    // Build set of referenced keys from metadata
-    const referenced = new Set();
-    for (const meta of Object.values(filesMeta.value)) {
-      for (const v of (meta?.versions || [])) {
-        if (v?.key) referenced.add(v.key);
-      }
-    }
-
-    // Fetch all existing blob keys
-    let allKeys = [];
+  async function cleanup() {
     try {
-      allKeys = await db.value.getAllKeys('files');
-    } catch (e) {
-      console.warn('Unable to list file keys for cleanup:', e);
-    }
-    const present = new Set(allKeys);
+      // Get all referenced keys
+      const referenced = new Set();
+      Object.values(files.value).forEach(meta =>
+        meta.versions?.forEach(v => v.key && referenced.add(v.key))
+      );
 
-    // Delete orphan blobs in a single transaction
-    try {
-      const tx = db.value.transaction(['files'], 'readwrite');
-      const filesStore = tx.objectStore('files');
-      for (const key of allKeys) {
-        if (!referenced.has(key)) {
-          try { await filesStore.delete(key); } catch { }
+      // Get all existing keys
+      const allKeys = await db.value.getAllKeys('files');
+      const orphanKeys = allKeys.filter(key => !referenced.has(key));
+
+      if (orphanKeys.length > 0) {
+        const tx = db.value.transaction(['files'], 'readwrite');
+        const filesStore = tx.objectStore('files');
+
+        for (const key of orphanKeys) {
+          try {
+            await filesStore.delete(key);
+          } catch (e) {
+            console.warn('Failed to delete orphan key:', key, e);
+          }
         }
+
+        await tx.done;
+        console.log(`Cleaned up ${orphanKeys.length} orphaned files`);
       }
-      await tx.done;
-    } catch (e) {
-      console.warn('Failed to delete orphan blobs:', e);
-    }
 
-    // Repair metadata: remove versions pointing to missing blobs
-    for (const [name, meta] of Object.entries(filesMeta.value)) {
-      const before = meta.versions?.length || 0;
-      meta.versions = (meta.versions || []).filter(v => present.has(v.key));
-      // Maintain ordering by version
-      meta.versions.sort((a, b) => (a.v || 0) - (b.v || 0));
-      const after = meta.versions.length;
-      if (after !== before) changed = true;
+      // Clean metadata of missing versions
+      let changed = false;
+      const presentKeys = new Set(allKeys);
 
-      // Recompute head and nextVersion
-      const last = after ? meta.versions[after - 1] : null;
-      if (last) {
-        if (!meta.head || meta.head.v !== last.v || meta.head.hash !== last.hash || meta.head.key !== last.key) {
-          meta.head = { v: last.v, hash: last.hash, key: last.key };
-          changed = true;
-        }
-        const expectedNext = (last.v || 0) + 1;
-        if (meta.nextVersion !== expectedNext) {
-          meta.nextVersion = expectedNext;
-          changed = true;
-        }
-      } else {
-        if (meta.head) { meta.head = null; changed = true; }
-        if (meta.nextVersion !== 1) { meta.nextVersion = 1; changed = true; }
+      for (const meta of Object.values(files.value)) {
+        const before = meta.versions?.length || 0;
+        meta.versions = (meta.versions || []).filter(v => presentKeys.has(v.key));
+        if (meta.versions.length !== before) changed = true;
       }
-      if (!meta.mime) meta.mime = 'text/markdown';
-    }
 
-    return changed;
+      if (changed) {
+        await saveMetadata();
+        console.log('Updated metadata after cleanup');
+      }
+
+    } catch (error) {
+      console.warn('Cleanup failed:', error);
+    }
   }
 
-  async function loadFile(name) {
-    if (dirty.value && currentFile.value) await saveFile();
+  async function selectFile(name) {
+    if (current.value.dirty) await saveFile();
 
-    currentFile.value = name;
-    if (!filesMeta.value[name]) {
-      filesMeta.value[name] = { name, mime: 'text/markdown', versions: [], head: null, nextVersion: 1 };
-    }
+    current.value = { name, mime: 'text/markdown', bytes: new Uint8Array(), dirty: false };
 
-    const meta = filesMeta.value[name];
-    currentMime.value = meta.mime || 'text/markdown';
-
-    // Determine HEAD version reliably
-    let latest = null;
-    if (meta.head && typeof meta.head.v === 'number') {
-      latest = (meta.versions || []).find(v => v.v === meta.head.v) || null;
-    }
-    if (!latest && (meta.versions || []).length) {
-      // Fallback to highest v
-      latest = [...meta.versions].sort((a, b) => (a.v || 0) - (b.v || 0)).slice(-1)[0];
-      // Update head if missing
-      meta.head = { v: latest.v, hash: latest.hash, key: latest.key };
-      await saveMetadata();
-    }
-    if (!latest) {
-      // New file - seed with example
-      const example = `## Welcome to your encrypted file vault!\n\nYou can edit this file, create new ones or import from your device.`;
-      contentBytes.value = encoder.encode(example);
-      dirty.value = true;
+    if (!files.value[name]) {
+      files.value[name] = { mime: 'text/markdown', versions: [] };
+      const welcome = `# Welcome to ${name}\n\nStart editing your encrypted file...`;
+      current.value.bytes = encoder.encode(welcome);
+      current.value.dirty = true;
       return;
     }
+
+    const meta = files.value[name];
+    const latest = meta.versions[meta.versions.length - 1];
+    current.value.mime = meta.mime;
+
+    if (!latest) return;
 
     loading.value = true;
     try {
       const encrypted = await db.value.get('files', latest.key);
-      if (encrypted) {
-        const compressed = await crypto.decryptToBytes(encrypted, keys.value.encKey);
-        const inflated = await compress.inflate(compressed);
-        // Verify integrity (hash) and authenticity (signature)
-        const computedHash = await crypto.hashBytes(inflated);
-        const hashMatches = computedHash === latest.hash;
-        const sigValid = keys.value.verify(latest.hash, latest.sig);
-        if (!hashMatches || !sigValid) {
-          console.error('Verification failed', { hashMatches, sigValid });
-          contentBytes.value = new Uint8Array();
-          throw new Error('File verification failed. Content may be corrupted or tampered.');
-        }
-        contentBytes.value = inflated;
-        dirty.value = false;
+      if (!encrypted) throw new Error('File data not found');
+
+      const decrypted = await cryptoUtils.decrypt(encrypted, keys.value.encKey);
+      const inflated = await compress.inflate(decrypted);
+
+      // Verify integrity
+      const hash = cryptoUtils.hash(inflated);
+      if (hash !== latest.hash || !keys.value.verify(hash, latest.sig)) {
+        throw new Error('File integrity verification failed');
       }
+
+      current.value.bytes = inflated;
+      current.value.dirty = false;
+
     } catch (e) {
       console.error('Load error:', e);
-      contentBytes.value = new Uint8Array();
-      try { if (e && e.message) alert(e.message); } catch { }
+      alert(e.message);
     } finally {
       loading.value = false;
     }
   }
 
   async function saveFile() {
-    if (!currentFile.value) return;
+    if (!current.value.name || !current.value.dirty) return;
 
-    const name = currentFile.value;
-    const bytes = contentBytes.value || new Uint8Array();
+    const { name, mime, bytes } = current.value;
+    const hash = cryptoUtils.hash(bytes);
 
-    // Content-addressable hash
-    const hash = await crypto.hashBytes(bytes);
-
-    // Ensure file meta exists
-    if (!filesMeta.value[name]) {
-      filesMeta.value[name] = { name, mime: currentMime.value, versions: [], head: null, nextVersion: 1 };
+    // Ensure file metadata exists
+    if (!files.value[name]) {
+      files.value[name] = { mime, versions: [] };
     }
-    const meta = filesMeta.value[name];
 
-    // If content unchanged (same HEAD hash), do not create a new version
-    if (meta.head?.hash === hash) {
-      // Allow MIME update without version bump
-      if (meta.mime !== currentMime.value) {
-        meta.mime = currentMime.value;
+    const meta = files.value[name];
+    const latest = meta.versions[meta.versions.length - 1];
+
+    // Skip if content unchanged
+    if (latest?.hash === hash) {
+      if (meta.mime !== mime) {
+        meta.mime = mime;
         await saveMetadata();
       }
-      dirty.value = false;
+      current.value.dirty = false;
       return;
     }
 
+    // Create new version
     const sig = keys.value.sign(hash);
     const key = `${hash}:${sig}`;
 
-    // Compress, encrypt (outside transaction)
     const compressed = await compress.deflate(bytes);
-    const encrypted = await crypto.encryptBytes(compressed, keys.value.encKey);
+    const encrypted = await cryptoUtils.encrypt(compressed, keys.value.encKey);
 
-    // Update metadata (in-memory) BEFORE starting transaction
-    meta.mime = currentMime.value;
-    const vnum = typeof meta.nextVersion === 'number' ? meta.nextVersion : ((meta.versions?.slice(-1)[0]?.v || 0) + 1);
+    // Update metadata
+    meta.mime = mime;
     meta.versions.push({
-      v: vnum,
-      hash,
-      sig,
-      key,
-      sizes: {
-        original: bytes.length,
-        compressed: compressed.length,
-        encrypted: (encrypted.iv?.length || 0) + (encrypted.data?.length || 0)
-      },
+      hash, sig, key,
+      size: bytes.length,
       ts: Date.now()
     });
-    // Maintain ordering by version
-    meta.versions.sort((a, b) => (a.v || 0) - (b.v || 0));
-    // Update head and bump nextVersion
-    meta.head = { v: vnum, hash, key };
-    meta.nextVersion = vnum + 1;
 
-    // Keep last 10 versions (oldest first) - decide deletions now
+    // Keep only last 10 versions
     const toDelete = [];
     while (meta.versions.length > 10) {
-      const old = meta.versions.shift();
-      toDelete.push(old.key);
+      toDelete.push(meta.versions.shift().key);
     }
 
-    // Prepare encrypted metadata payload before transaction
-    const jsonBytes = encoder.encode(JSON.stringify(filesMeta.value || {}));
-    const metaEncrypted = await crypto.encryptBytes(jsonBytes, keys.value.encKey);
+    // Prepare metadata encryption before transaction
+    const metaBytes = encoder.encode(JSON.stringify(files.value));
+    const metaEncrypted = await cryptoUtils.encrypt(metaBytes, keys.value.encKey);
 
-    // Perform atomic write of file blob and metadata in a single transaction
+    // Atomic save transaction
     const tx = db.value.transaction(['files', 'meta'], 'readwrite');
     const filesStore = tx.objectStore('files');
     const metaStore = tx.objectStore('meta');
 
-    await filesStore.put(encrypted, key);
-    for (const k of toDelete) {
-      try { await filesStore.delete(k); } catch { }
-    }
-    await metaStore.put(metaEncrypted, 'index');
+    try {
+      // Store new file version
+      await filesStore.put(encrypted, key);
 
-    await tx.done;
-    dirty.value = false;
+      // Delete old versions
+      for (const k of toDelete) {
+        try {
+          await filesStore.delete(k);
+        } catch (e) {
+          console.warn('Failed to delete old version:', k, e);
+        }
+      }
+
+      // Update metadata
+      await metaStore.put(metaEncrypted, 'index');
+
+      // Wait for transaction to complete
+      await tx.done;
+      current.value.dirty = false;
+
+    } catch (error) {
+      console.error('Transaction failed:', error);
+      tx.abort();
+      throw error;
+    }
   }
 
-  function newFile() {
-    const name = prompt('File name:')?.trim();
-    if (!name || filesMeta.value[name]) {
-      if (filesMeta.value[name]) alert('File exists');
-      return;
+  function newFile(name) {
+    name = name?.trim() || prompt('File name:')?.trim();
+    if (!name) return false;
+    if (files.value[name]) {
+      alert('File already exists');
+      return false;
     }
-    filesMeta.value[name] = { name, mime: 'text/markdown', versions: [] };
-    loadFile(name);
+    selectFile(name);
+    return true;
   }
 
   async function deleteFile(name) {
-    if (!confirm(`Delete ${name}?`)) return;
-    const meta = filesMeta.value[name];
-    // Prepare updated metadata and encrypted payload before transaction
-    const keysToDelete = (meta?.versions || []).map(v => v.key);
-    delete filesMeta.value[name];
-    const jsonBytes = encoder.encode(JSON.stringify(filesMeta.value || {}));
-    const metaEncrypted = await crypto.encryptBytes(jsonBytes, keys.value.encKey);
+    if (!confirm(`Delete "${name}"?`)) return;
+
+    const meta = files.value[name];
+    const keysToDelete = meta?.versions?.map(v => v.key) || [];
+    delete files.value[name];
+
+    // Prepare metadata encryption
+    const metaBytes = encoder.encode(JSON.stringify(files.value));
+    const metaEncrypted = await cryptoUtils.encrypt(metaBytes, keys.value.encKey);
 
     const tx = db.value.transaction(['files', 'meta'], 'readwrite');
     const filesStore = tx.objectStore('files');
     const metaStore = tx.objectStore('meta');
-    for (const k of keysToDelete) {
-      try { await filesStore.delete(k); } catch { }
-    }
-    await metaStore.put(metaEncrypted, 'index');
-    await tx.done;
-    if (currentFile.value === name) {
-      currentFile.value = '';
-      contentBytes.value = new Uint8Array();
-      dirty.value = false;
+
+    try {
+      // Delete file versions
+      for (const key of keysToDelete) {
+        try {
+          await filesStore.delete(key);
+        } catch (e) {
+          console.warn('Failed to delete file version:', key, e);
+        }
+      }
+
+      // Update metadata
+      await metaStore.put(metaEncrypted, 'index');
+
+      await tx.done;
+
+      if (current.value.name === name) {
+        current.value = { name: '', mime: 'text/markdown', bytes: new Uint8Array(), dirty: false };
+      }
+
+    } catch (error) {
+      console.error('Delete transaction failed:', error);
+      tx.abort();
+      throw error;
     }
   }
 
   async function importFile(file) {
-    if (!file) return;
-    currentFile.value = file.name;
-    currentMime.value = file.type || 'application/octet-stream';
-    contentBytes.value = new Uint8Array(await file.arrayBuffer());
-    dirty.value = true;
+    if (!file) return false;
+    current.value = {
+      name: file.name,
+      mime: file.type || 'application/octet-stream',
+      bytes: new Uint8Array(await file.arrayBuffer()),
+      dirty: true
+    };
+    return true;
   }
 
   function exportFile() {
-    if (!currentFile.value) return;
-    const blob = new Blob([contentBytes.value], { type: currentMime.value });
+    if (!current.value.name) return;
+    const blob = new Blob([current.value.bytes], { type: current.value.mime });
     const url = URL.createObjectURL(blob);
-    Object.assign(document.createElement('a'), {
-      href: url,
-      download: currentFile.value
-    }).click();
-    URL.revokeObjectURL(url);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = current.value.name;
+    a.click();
+    // URL.revokeObjectURL(url);
   }
 
-  // Cleanup
-  onBeforeUnmount(() => {
-    if (saveTimer) clearTimeout(saveTimer);
-  });
+  async function renameFile(oldName, newName) {
+    if (!files.value[oldName] || files.value[newName]) return false;
+    files.value[newName] = files.value[oldName];
+    delete files.value[oldName];
+    await saveMetadata();
+    if (current.value.name === oldName) current.value.name = newName;
+    return true;
+  }
+
+  async function exportAll() {
+    const exported = {};
+    for (const [name, meta] of Object.entries(files.value)) {
+      const latest = meta.versions[meta.versions.length - 1];
+      if (latest) {
+        try {
+          const encrypted = await db.value.get('files', latest.key);
+          const decrypted = await cryptoUtils.decrypt(encrypted, keys.value.encKey);
+          const content = await compress.inflate(decrypted);
+          exported[name] = {
+            mime: meta.mime,
+            content: Array.from(content) // Serializable
+          };
+        } catch (e) {
+          console.warn(`Export failed for ${name}:`, e);
+        }
+      }
+    }
+    return exported;
+  }
+
+  // Cleanup on unmount
+  onBeforeUnmount(() => clearTimeout(saveTimer));
 
   return {
-    auth, loading, filesMeta, filesList,
-    currentFile, currentMime, contentText, contentBytes, dirty,
-    login, loadFile, saveFile, newFile, deleteFile, importFile, exportFile
+    // State
+    auth, loading, files: filesList,
+    currentFile: computed(() => current.value.name),
+    currentMime: computed({
+      get: () => current.value.mime,
+      set: (mime) => { current.value.mime = mime; current.value.dirty = true; }
+    }),
+    contentText,
+    // Expose raw bytes for binary previews
+    contentBytes: computed(() => current.value.bytes),
+    isDirty: computed(() => current.value.dirty),
+
+    // Core operations
+    login, saveFile,
+
+    // File operations
+    selectFile, newFile, deleteFile, renameFile,
+    importFile, exportFile, exportAll
   };
 }
-
-
-export const crypto = {
-  async deriveKeys(pwd) {
-    const pwdBytes = encoder.encode(String(pwd || '').normalize('NFC').trim());
-    if (pwdBytes.length < 8) throw new Error('Password too short');
-
-    // Use WebCrypto PBKDF2 for key derivation (compatible approach)
-    const salt = encoder.encode('idb-vault-v2');
-    const keyMaterial = await window.crypto.subtle.importKey(
-      'raw', pwdBytes, 'PBKDF2', false, ['deriveBits']
-    );
-    const derivedBits = await window.crypto.subtle.deriveBits(
-      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-      keyMaterial, 512 // 64 bytes
-    );
-    const masterKey = new Uint8Array(derivedBits);
-
-    // Derive Ed25519 signing key (32 bytes)
-    const sigKey = masterKey.slice(0, 32);
-    const pubKey = ed25519.getPublicKey(sigKey);
-
-    // Derive AES encryption key (32 bytes)
-    const encKeyMaterial = masterKey.slice(32, 64);
-    const encKey = await window.crypto.subtle.importKey(
-      'raw', encKeyMaterial, 'AES-GCM', false, ['encrypt', 'decrypt']
-    );
-
-    // Database name from public key hash
-    const pubKeyHash = new Uint8Array(await window.crypto.subtle.digest('SHA-256', pubKey));
-
-    // Expose a non-extractable-like handle for the signing key and a signer function
-    const signKey = Object.freeze({ type: 'private', algorithm: { name: 'Ed25519' }, usages: ['sign'] });
-    const sign = (hashHex) => crypto.signHash(hashHex, sigKey);
-    const verifyKey = Object.freeze({ type: 'public', algorithm: { name: 'Ed25519' }, usages: ['verify'] });
-    const verify = (hashHex, sigHex) => crypto.verifyHash(hashHex, sigHex, pubKey);
-
-    return {
-      signKey,
-      sign,
-      verifyKey,
-      verify,
-      encKey,
-      dbName: bytesToHex(pubKeyHash.slice(0, 16)) // 32 hex chars
-    };
-  },
-
-  // Content-addressable hash ID using WebCrypto
-  async hashBytes(bytes) {
-    const digest = await window.crypto.subtle.digest('SHA-256', bytes);
-    return bytesToHex(new Uint8Array(digest));
-  },
-
-  // Ed25519 signature for authenticity
-  signHash(hashHex, sigKey) {
-    const hashBytes = hexToBytes(hashHex);
-    const sig = ed25519.sign(hashBytes, sigKey);
-    return bytesToHex(sig);
-  },
-
-  // Verify Ed25519 signature
-  verifyHash(hashHex, sigHex, pubKey) {
-    try {
-      const hashBytes = hexToBytes(hashHex);
-      const sigBytes = hexToBytes(sigHex);
-      return ed25519.verify(sigBytes, hashBytes, pubKey);
-    } catch { return false; }
-  },
-
-  async encryptBytes(bytes, key) {
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const encrypted = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes);
-    return {
-      iv,
-      data: new Uint8Array(encrypted)
-    };
-  },
-
-  async decryptToBytes(payload, key) {
-    const iv = new Uint8Array(payload.iv);
-    const data = new Uint8Array(payload.data);
-    const decrypted = await window.crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
-      key,
-      data
-    );
-    return new Uint8Array(decrypted);
-  }
-};
-
-export const compress = {
-  async deflate(bytes) {
-    return new Promise((resolve, reject) =>
-      deflate(bytes, (err, result) => err ? reject(err) : resolve(result))
-    );
-  },
-
-  async inflate(bytes) {
-    return new Promise((resolve, reject) =>
-      inflate(bytes, (err, result) => err ? reject(err) : resolve(result))
-    );
-  }
-};

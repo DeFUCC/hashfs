@@ -33,10 +33,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build project
+      - name: Build JS
         run: pnpm run lib
 
-      - name: Build project
+      - name: Build HTML
         run: pnpm run build
 
       - name: Create Release Draft
