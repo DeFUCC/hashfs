@@ -1,0 +1,29 @@
+{
+	"id": "hashfs",
+	"name": "HashFS",
+	"short_name": "HashFS",
+	"description": "Content-addressed secure file storage in a browser tab",
+	"start_url": "/",
+	"background_color": "#e5e5e5",
+	"theme_color": "#993300",
+	"display": "standalone",
+	"orientation": "any",
+	"display_override": ["window-controls-overlay", "minimal-ui", "standalone"],
+	"handle_links": "preferred",
+	"prefer_related_applications": false,
+	"categories": [
+		"productivity",
+		"utilities"
+	],
+	"icons": [
+		{
+			"src": "./icon.svg",
+			"sizes": "any",
+			"type": "image/svg+xml",
+			"purpose": "any"
+		}
+	],
+	"launch_handler": {
+		"client_mode": ["focus-existing", "auto"]
+	}
+}
