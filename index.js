@@ -31,7 +31,8 @@ export function useHashFS(passphrase) {
       name,
       mime: meta.mime || 'text/markdown',
       versions: meta.headVersion || 0,
-      size: 0, // Lazily loaded when needed
+      size: meta.lastSize || 0,
+      compressedSize: meta.lastCompressedSize || 0,
       modified: meta.lastModified || 0,
       active: current.name === name
     })).sort((a, b) => a.name.localeCompare(b.name))
@@ -76,6 +77,7 @@ export function useHashFS(passphrase) {
           const decrypted = await cryptoUtils.decrypt(encrypted, keys.value.encKey);
           const data = JSON.parse(decoder.decode(decrypted));
           Object.assign(metadata.files, data.files || {});
+
         }
       } catch (e) {
         console.warn('Metadata load failed:', e);
@@ -91,6 +93,7 @@ export function useHashFS(passphrase) {
     }
   }
 
+
   async function saveMetadata() {
     const data = { files: metadata.files, schemaVersion: 4 };
     const bytes = encoder.encode(JSON.stringify(data));
@@ -100,18 +103,56 @@ export function useHashFS(passphrase) {
 
   async function cleanup() {
     try {
-      // Get all referenced keys from all chains
+      // Get all referenced keys from all chains and metadata
       const referenced = new Set();
+      const ghostFiles = [];
 
-      for (const meta of Object.values(metadata.files)) {
+      for (const [fileName, meta] of Object.entries(metadata.files)) {
+        let hasValidContent = false;
+
         if (meta.chainId) {
-          const chain = await chainManager.value.getChain(meta.chainId);
-          chain.versions.forEach(v => v.key && referenced.add(v.key));
+          try {
+            const chain = await chainManager.value.getChain(meta.chainId);
+            chain.versions.forEach(v => {
+              if (v.key) {
+                referenced.add(v.key);
+                hasValidContent = true;
+              }
+            });
+          } catch (error) {
+            console.warn(`Failed to load chain for ${fileName}:`, error);
+          }
         }
-        if (meta.activeKey) referenced.add(meta.activeKey);
+
+        if (meta.activeKey) {
+          // Verify the active key actually exists
+          try {
+            const exists = await db.value.get('files', meta.activeKey);
+            if (exists) {
+              referenced.add(meta.activeKey);
+              hasValidContent = true;
+            } else {
+              console.warn(`Ghost file detected: ${fileName} - activeKey ${meta.activeKey} not found`);
+            }
+          } catch (error) {
+            console.warn(`Error checking activeKey for ${fileName}:`, error);
+          }
+        }
+
+        // If file has no valid content, mark as ghost
+        if (!hasValidContent && (meta.activeKey || meta.headVersion > 0)) {
+          ghostFiles.push(fileName);
+        }
       }
 
-      // Clean orphaned files
+      // Remove ghost files from metadata
+      if (ghostFiles.length > 0) {
+        console.warn('Removing ghost files:', ghostFiles);
+        ghostFiles.forEach(name => delete metadata.files[name]);
+        await saveMetadata();
+      }
+
+      // Clean orphaned files from database
       const allKeys = await db.value.getAllKeys('files');
       const orphaned = allKeys.filter(key => !referenced.has(key));
 
@@ -120,11 +161,15 @@ export function useHashFS(passphrase) {
         const store = tx.objectStore('files');
 
         for (const key of orphaned) {
-          try { await store.delete(key); }
-          catch (e) { console.warn('Cleanup failed for:', key); }
+          try {
+            await store.delete(key);
+          } catch (e) {
+            console.warn('Cleanup failed for:', key, e);
+          }
         }
+
         await tx.done;
-        console.log(`Cleaned up ${orphaned.length} orphaned files`);
+        console.log(`Cleaned up ${orphaned.length} orphaned files and ${ghostFiles.length} ghost files`);
       }
 
     } catch (error) {
@@ -142,7 +187,8 @@ export function useHashFS(passphrase) {
       dirty: false
     });
 
-    if (!metadata.files[name]) {
+    const meta = metadata.files[name];
+    if (!meta) {
       // New file
       const chainId = cryptoUtils.generateChainId();
       metadata.files[name] = {
@@ -150,6 +196,8 @@ export function useHashFS(passphrase) {
         chainId,
         headVersion: 0,
         lastModified: Date.now(),
+        lastSize: 0,
+        lastCompressedSize: 0,
         activeKey: null
       };
 
@@ -159,15 +207,27 @@ export function useHashFS(passphrase) {
       return;
     }
 
-    const meta = metadata.files[name];
     current.mime = meta.mime;
 
-    if (!meta.activeKey || meta.headVersion === 0) return;
+    // Check if file actually has content
+    if (!meta.activeKey || meta.headVersion === 0) {
+      console.warn(`File "${name}" has no content, treating as new file`);
+      return;
+    }
 
     loading.value = true;
     try {
+      // Verify file exists in database first
       const encrypted = await db.value.get('files', meta.activeKey);
-      if (!encrypted) throw new Error('File data not found');
+      if (!encrypted) {
+        console.error(`File data not found for "${name}", key: ${meta.activeKey}`);
+
+        // Handle ghost file - remove from metadata
+        delete metadata.files[name];
+        await saveMetadata();
+
+        throw new Error(`File "${name}" is corrupted and has been removed from the file list. Please create a new file with this name if needed.`);
+      }
 
       const decrypted = await cryptoUtils.decrypt(encrypted, keys.value.encKey);
       const inflated = await compress.inflate(decrypted);
@@ -178,7 +238,8 @@ export function useHashFS(passphrase) {
       const latest = chain.versions[chain.versions.length - 1];
 
       if (!latest || hash !== latest.hash || !keys.value.verify(hash, latest.sig)) {
-        throw new Error('File integrity verification failed');
+        console.error(`Integrity verification failed for "${name}"`);
+        throw new Error(`File "${name}" failed integrity verification. The file may be corrupted.`);
       }
 
       current.bytes = inflated;
@@ -187,6 +248,16 @@ export function useHashFS(passphrase) {
     } catch (e) {
       console.error('Load error:', e);
       alert(e.message);
+
+      // If it's a ghost file, clean up
+      if (e.message.includes('File data not found') || e.message.includes('corrupted')) {
+        Object.assign(current, {
+          name: '',
+          mime: 'text/markdown',
+          bytes: new Uint8Array(),
+          dirty: false
+        });
+      }
     } finally {
       loading.value = false;
     }
@@ -206,6 +277,8 @@ export function useHashFS(passphrase) {
         chainId,
         headVersion: 0,
         lastModified: Date.now(),
+        lastSize: bytes.length,
+        lastCompressedSize: 0,
         activeKey: null
       };
     }
@@ -213,37 +286,56 @@ export function useHashFS(passphrase) {
     const meta = metadata.files[name];
 
     // Check if content is unchanged
-    const chain = await chainManager.value.getChain(meta.chainId);
-    const latest = chain.versions[chain.versions.length - 1];
+    try {
+      const chain = await chainManager.value.getChain(meta.chainId);
+      const latest = chain.versions[chain.versions.length - 1];
 
-    if (latest?.hash === hash) {
-      if (meta.mime !== mime) {
-        meta.mime = mime;
-        await saveMetadata();
+      if (latest?.hash === hash) {
+        if (meta.mime !== mime) {
+          meta.mime = mime;
+          await saveMetadata();
+        }
+        current.dirty = false;
+        return;
       }
-      current.dirty = false;
-      return;
+    } catch (error) {
+      console.warn('Chain verification failed, continuing with save:', error);
     }
 
-    // Create new version
+    // Prepare new version data
     const sig = keys.value.sign(hash);
     const key = cryptoUtils.generateKey();
     const version = meta.headVersion + 1;
 
-    const compressed = await compress.deflate(bytes);
-    const encrypted = await cryptoUtils.encrypt(compressed, keys.value.encKey);
+    let compressed, encrypted, metaEncrypted;
 
-    // Prepare metadata update
-    meta.mime = mime;
-    meta.headVersion = version;
-    meta.lastModified = Date.now();
-    meta.activeKey = key;
+    try {
+      compressed = await compress.deflate(bytes);
+      encrypted = await cryptoUtils.encrypt(compressed, keys.value.encKey);
 
-    const metaBytes = encoder.encode(JSON.stringify({
-      files: metadata.files,
-      schemaVersion: 4
-    }));
-    const metaEncrypted = await cryptoUtils.encrypt(metaBytes, keys.value.encKey);
+      // Prepare updated metadata
+      const updatedMetadata = {
+        ...metadata.files,
+        [name]: {
+          ...meta,
+          mime,
+          headVersion: version,
+          lastModified: Date.now(),
+          lastSize: bytes.length,
+          lastCompressedSize: compressed.length,
+          activeKey: key
+        }
+      };
+
+      const metaBytes = encoder.encode(JSON.stringify({
+        files: updatedMetadata,
+        schemaVersion: 4
+      }));
+      metaEncrypted = await cryptoUtils.encrypt(metaBytes, keys.value.encKey);
+    } catch (error) {
+      console.error('Failed to prepare save data:', error);
+      throw error;
+    }
 
     // Atomic transaction
     const tx = db.value.transaction(['files', 'meta'], 'readwrite');
@@ -255,21 +347,38 @@ export function useHashFS(passphrase) {
       await metaStore.put(metaEncrypted, 'index');
       await tx.done;
 
+      // Update in-memory metadata only after successful transaction
+      meta.mime = mime;
+      meta.headVersion = version;
+      meta.lastModified = Date.now();
+      meta.lastSize = bytes.length;
+      meta.lastCompressedSize = compressed.length;
+      meta.activeKey = key;
+
       // Update chain after successful storage
-      await chainManager.value.addVersion(meta.chainId, {
-        version,
-        hash,
-        sig,
-        key,
-        size: bytes.length,
-        ts: Date.now()
-      });
+      try {
+        await chainManager.value.addVersion(meta.chainId, {
+          version,
+          hash,
+          sig,
+          key,
+          size: bytes.length,
+          ts: Date.now()
+        });
+      } catch (chainError) {
+        console.error('Chain update failed:', chainError);
+        // Don't throw - file is saved, chain can be rebuilt
+      }
 
       current.dirty = false;
 
     } catch (error) {
       console.error('Save failed:', error);
-      tx.abort();
+      try {
+        tx.abort();
+      } catch (abortError) {
+        console.warn('Failed to abort transaction:', abortError);
+      }
       throw error;
     }
   }
@@ -288,53 +397,104 @@ export function useHashFS(passphrase) {
     if (!confirm(`Delete "${name}"?`)) return;
 
     const meta = metadata.files[name];
-    delete metadata.files[name];
+    if (!meta) return; // Already deleted
 
-    // Clean up chain and files
-    if (meta?.chainId) {
-      const chain = await chainManager.value.getChain(meta.chainId);
-      const keysToDelete = chain.versions.map(v => v.key);
+    // Collect all keys to delete BEFORE starting transaction
+    const keysToDelete = [];
+    let chainId = null;
 
-      if (meta.activeKey) keysToDelete.push(meta.activeKey);
-
-      const tx = db.value.transaction(['files', 'meta', 'chains'], 'readwrite');
-
-      try {
-        // Delete files
-        const filesStore = tx.objectStore('files');
-        for (const key of keysToDelete) {
-          try { await filesStore.delete(key); }
-          catch (e) { console.warn('Delete failed for:', key); }
-        }
-
-        // Delete chain
-        await tx.objectStore('chains').delete(meta.chainId);
-
-        // Update metadata
-        const metaBytes = encoder.encode(JSON.stringify({
-          files: metadata.files,
-          schemaVersion: 4
-        }));
-        const metaEncrypted = await cryptoUtils.encrypt(metaBytes, keys.value.encKey);
-        await tx.objectStore('meta').put(metaEncrypted, 'index');
-
-        await tx.done;
-      } catch (error) {
-        console.error('Delete transaction failed:', error);
-        tx.abort();
-        throw error;
+    try {
+      if (meta.chainId) {
+        chainId = meta.chainId;
+        const chain = await chainManager.value.getChain(meta.chainId);
+        keysToDelete.push(...chain.versions.map(v => v.key).filter(Boolean));
       }
+      if (meta.activeKey) {
+        keysToDelete.push(meta.activeKey);
+      }
+    } catch (error) {
+      console.warn('Failed to collect keys for deletion:', error);
+      // Continue with deletion anyway to clean up metadata
     }
 
-    if (current.name === name) {
-      Object.assign(current, {
-        name: '',
-        mime: 'text/markdown',
-        bytes: new Uint8Array(),
-        dirty: false
-      });
+    // Prepare new metadata WITHOUT the deleted file
+    const newMetadata = { ...metadata.files };
+    delete newMetadata[name];
+
+    const metaBytes = encoder.encode(JSON.stringify({
+      files: newMetadata,
+      schemaVersion: 4
+    }));
+
+    let metaEncrypted;
+    try {
+      metaEncrypted = await cryptoUtils.encrypt(metaBytes, keys.value.encKey);
+    } catch (error) {
+      console.error('Failed to encrypt metadata:', error);
+      return;
+    }
+
+    // Start atomic transaction
+    const tx = db.value.transaction(['files', 'meta', 'chains'], 'readwrite');
+    const filesStore = tx.objectStore('files');
+    const metaStore = tx.objectStore('meta');
+    const chainsStore = tx.objectStore('chains');
+
+    try {
+      // Delete all file content keys
+      for (const key of keysToDelete) {
+        try {
+          await filesStore.delete(key);
+        } catch (e) {
+          console.warn('Failed to delete file content:', key, e);
+          // Continue with other deletions
+        }
+      }
+
+      // Delete chain if it exists
+      if (chainId) {
+        try {
+          await chainsStore.delete(chainId);
+        } catch (e) {
+          console.warn('Failed to delete chain:', chainId, e);
+        }
+      }
+
+      // Update metadata last
+      await metaStore.put(metaEncrypted, 'index');
+
+      // Wait for transaction to complete
+      await tx.done;
+
+      // Only update in-memory metadata AFTER successful transaction
+      delete metadata.files[name];
+
+      // Clear current file if it was the deleted one
+      if (current.name === name) {
+        Object.assign(current, {
+          name: '',
+          mime: 'text/markdown',
+          bytes: new Uint8Array(),
+          dirty: false
+        });
+      }
+
+      console.log(`Successfully deleted file: ${name}`);
+
+    } catch (error) {
+      console.error('Delete transaction failed:', error);
+      try {
+        tx.abort();
+      } catch (abortError) {
+        console.warn('Failed to abort transaction:', abortError);
+      }
+
+      // Don't update metadata on failure - keep it consistent
+      alert(`Failed to delete file "${name}": ${error.message}`);
+      throw error;
     }
   }
+
 
   async function importFile(file) {
     if (!file) return false;

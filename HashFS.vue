@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { useHashFS } from './index';
+import { useHashFS } from './index.js';
 
 const props = defineProps({
   passphrase: { type: String, required: true }
@@ -12,21 +12,50 @@ const {
   importFile, exportFile, exportAll
 } = useHashFS(props.passphrase);
 
-
+const showRenameDialog = ref(false);
 const renameTarget = ref('');
 const newName = ref('');
 const dragOver = ref(false);
+const fileInput = ref(null);
 
 // Computed helpers
 const hasFiles = computed(() => files.value.length > 0);
 const canEdit = computed(() => currentFile.value && isTextMime(currentMime.value));
+const totalSize = computed(() => {
+  return files.value.reduce((sum, f) => {
+    // Use current file's actual size if it's the active file
+    if (f.active && contentText.value) {
+      return sum + contentText.value.length;
+    }
+    return sum + (f.size || 0);
+  }, 0);
+});
+
+const totalCompressedSize = computed(() => {
+  return files.value.reduce((sum, f) => sum + (f.compressedSize || 0), 0);
+});
+
+const compressionRatio = computed(() => {
+  if (totalSize.value === 0) return 0;
+  return ((totalSize.value - totalCompressedSize.value) / totalSize.value) * 100;
+});
+
+// Estimate database overhead (metadata, encryption, indexeddb overhead ~20%)
+const estimatedDbSize = computed(() => {
+  const metadataSize = JSON.stringify(files.value).length * 2; // Rough estimate
+  const encryptionOverhead = totalCompressedSize.value * 0.1; // ~10% for IV + encryption
+  const indexedDbOverhead = totalCompressedSize.value * 0.2; // ~20% for IndexedDB overhead
+
+  return totalCompressedSize.value + metadataSize + encryptionOverhead + indexedDbOverhead;
+});
+
 const statusText = computed(() => {
   if (loading.value) return '🔄 Working...';
   if (isDirty.value) return '📝 Unsaved changes';
   return '✅ Ready';
 });
 
-// Preview helpers
+// File type detection
 const imageExtRE = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif|heic|heif|tiff)$/i;
 const isImage = computed(() => {
   const name = currentFile.value || '';
@@ -34,15 +63,16 @@ const isImage = computed(() => {
   return /^image\//.test(mime) || imageExtRE.test(name);
 });
 
+// Image blob URL management
 const blobUrl = ref(null);
 watch([contentBytes, currentMime, currentFile, isImage], () => {
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = null;
   }
-  if (isImage.value && contentBytes.value && contentBytes.value.length) {
+  if (isImage.value && contentBytes.value?.length) {
     try {
-      const blob = new Blob([contentBytes.value], { type: currentMime.value || 'application/octet-stream' });
+      const blob = new Blob([contentBytes.value], { type: currentMime.value || 'image/png' });
       blobUrl.value = URL.createObjectURL(blob);
     } catch { /* ignore */ }
   }
@@ -54,79 +84,107 @@ onBeforeUnmount(() => {
 
 // Utility functions
 function formatSize(bytes) {
-  if (!Number.isFinite(bytes)) return '-';
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function isTextMime(mime) {
   if (!mime) return true;
   return /^text\//.test(mime) ||
-    /(json|xml|svg|turtle|trig|sparql|sql|csv|yaml|yml|md|markdown)/i.test(mime);
+    /(json|xml|svg|turtle|trig|sparql|sql|csv|yaml|yml|md|markdown|javascript|typescript)/i.test(mime);
 }
 
 function formatDate(ts) {
-  return new Date(ts).toLocaleString('en-US', {
+  if (!ts) return 'Unknown';
+  const now = Date.now();
+  const diff = now - ts;
+
+  if (diff < 60000) return 'Just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+
+  return new Date(ts).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
 }
 
+function getCompressionRatio(originalSize, compressedSize) {
+  if (!originalSize || !compressedSize) return 0;
+  return ((originalSize - compressedSize) / originalSize) * 100;
+}
+
 // File operations
-async function handleImport(file) {
+async function handleImport(fileList) {
+  const file = fileList?.[0];
   if (!file) return;
-  await importFile(file);
+
+  try {
+    await importFile(file);
+    if (fileInput.value) fileInput.value.value = '';
+  } catch (error) {
+    alert(`Import failed: ${error.message}`);
+  }
 }
 
 async function handleNewFile() {
   const name = prompt('Enter file name:')?.trim();
-  if (name) await newFile(name);
+  if (name && !files.value.find(f => f.name === name)) {
+    await newFile(name);
+  } else if (name) {
+    alert('File already exists');
+  }
 }
-
-const renameDialog = ref(null);
 
 async function startRename(fileName) {
   renameTarget.value = fileName;
   newName.value = fileName;
-  nextTick(() => {
-    renameDialog.value.showModal();
-    // Focus the input field when dialog opens
-    const input = renameDialog.value.querySelector('input');
-    input?.select();
-  });
+  showRenameDialog.value = true;
+
+  await nextTick();
+  const input = document.querySelector('.rename-input');
+  input?.select();
 }
 
-async function confirmRename(e) {
-  e?.preventDefault();
+async function confirmRename() {
   if (renameTarget.value && newName.value && renameTarget.value !== newName.value) {
     const success = await renameFile(renameTarget.value, newName.value);
     if (!success) {
       alert('Rename failed - file may already exist');
-      return; // Don't close dialog on error
+      return;
     }
   }
-  renameDialog.value?.close();
+  showRenameDialog.value = false;
 }
 
-// Drag & drop handlers
+function cancelRename() {
+  showRenameDialog.value = false;
+  renameTarget.value = '';
+  newName.value = '';
+}
+
+async function confirmDelete(fileName) {
+  if (confirm(`Delete "${fileName}" permanently?`)) {
+    await deleteFile(fileName);
+  }
+}
+
+// Drag & drop
 function handleDragOver(e) {
   e.preventDefault();
   dragOver.value = true;
 }
 
-function handleDragLeave(e) {
-  e.preventDefault();
+function handleDragLeave() {
   dragOver.value = false;
 }
 
 async function handleDrop(e) {
   e.preventDefault();
   dragOver.value = false;
-  const files = Array.from(e.dataTransfer.files);
-  if (files.length > 0) {
-    await handleImport(files[0]);
-  }
+  await handleImport(e.dataTransfer.files);
 }
 
 // Keyboard shortcuts
@@ -141,146 +199,194 @@ function handleKeydown(e) {
         e.preventDefault();
         handleNewFile();
         break;
+      case 'e':
+        e.preventDefault();
+        if (currentFile.value) exportFile();
+        break;
     }
+  }
+
+  // ESC to close dialogs
+  if (e.key === 'Escape') {
+    showRenameDialog.value = false;
   }
 }
 
 onMounted(() => {
   login();
   window.addEventListener('keydown', handleKeydown);
-  return () => window.removeEventListener('keydown', handleKeydown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown);
 });
 </script>
 
 <template lang="pug">
-.hashfs-vault.font-mono.mx-auto.max-w-6xl.px-4.py-6(
-  @dragover="handleDragOver"
-  @dragleave="handleDragLeave"
-  @drop="handleDrop"
-  :class="{ 'bg-blue-50 border-2 border-dashed border-blue-500 rounded-lg': dragOver }"
-)
-
+.hashfs-vault.font-mono.mx-auto.max-w-7xl.px-4.py-6.min-h-screen(@dragover="handleDragOver", @dragleave="handleDragLeave", @drop="handleDrop", :class="{ 'bg-blue-50 border-2 border-dashed border-blue-400 rounded-lg': dragOver }")
+  //  Header 
   header.flex.items-center.justify-between.mb-6.pb-4.border-b.border-stone-300
-    h1.m-0.text-stone-800.flex.items-center.gap-2
-      | 🔐 Secure Vault
-      .text-sm.font-normal.text-stone-500 {{ statusText }}
+    .flex.items-center.gap-3
+      h1.m-0.text-2xl.font-bold.text-stone-800.flex.items-center.gap-2 🔒 Secure Vault
+      .text-sm.text-stone-500.px-2.py-1.bg-stone-100.rounded.
+        {{ statusText }}
 
-    .header-actions.flex.gap-2(v-if="auth")
-      button.px-4.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-100.transition(@click="handleNewFile" title="Create new file (Ctrl+N)")
-        | 📄 New
+    .flex.items-center.gap-2(v-if="auth")
+      button.px-3.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.transition.text-sm.font-medium(@click="handleNewFile", title="Create new file (Ctrl+N)").
+        📄 New
 
-      label.px-4.py-2.rounded.border.border-stone-300.bg-stone-200.text-stone-700.hover-bg-stone-300.transition.cursor-pointer(title="Import file")
+      label.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.cursor-pointer.text-sm.font-medium
         | 📥 Import
-        input.hidden(type="file" @change="handleImport($event.target.files?.[0])")
 
-      button.px-4.py-2.rounded.border.border-stone-300.bg-stone-200.text-stone-700.hover-bg-stone-300.transition(v-if="hasFiles" @click="exportAll" :disabled="loading" title="Export all files")
-        | 📦 Export All
+        input.hidden(ref="fileInput", type="file", @change="handleImport($event.target.files)")
+      button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.disabled-opacity-50.text-sm.font-medium(v-if="hasFiles", @click="exportAll", :disabled="loading", title="Export all files").
+        📦 Export All
 
-  // Rename Dialog
-  dialog(ref="renameDialog" class="rounded-lg p-6 w-full max-w-md border-0 shadow-xl backdrop:bg-black/50")
-    form(method="dialog" @submit="confirmRename" class="space-y-4")
-      h3.mt-0.mb-4.text-lg.font-medium.text-stone-800 Rename File
-      .space-y-4
-        input.w-full.px-3.py-2.border.border-stone-300.rounded.mb-2(
-          type="text"
-          v-model="newName"
-          required
-          placeholder="Enter new file name"
-          class="w-full"
-        )
-      .flex.justify-end.gap-3.mt-6
-        button.px-4.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-100(type="button" @click="renameDialog.close()") Cancel
-        button.px-4.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700(type="submit") Rename
+  //  Main Content 
+  .grid.grid-cols-1.lg-grid-cols-2.gap-6.min-h-600px(v-if="auth")
+    //  Sidebar - File List 
+    .bg-stone-50.rounded-lg.border.border-stone-200
+      .p-4.border-b.border-stone-200.bg-white.rounded-t-lg
+        .flex.items-center.justify-between.mb-2
+          h3.m-0.font-semibold.text-stone-800.
+            Files ({{ files.length }})
 
-  // Main content
-  .main-content.grid(v-if="auth" class="min-h-[600px] grid-cols-1 md:grid-cols-[320px_1fr] gap-6")
+        .text-xs.text-stone-500.space-y-1(v-if="hasFiles")
+          .flex.justify-between
+            span Original:
+            span.font-mono {{ formatSize(totalSize) }}
+          .flex.justify-between
+            span Compressed:
+            span.font-mono {{ formatSize(totalCompressedSize) }}
+          .flex.justify-between
+            span Saved:
+            span.font-mono.text-green-600 {{ compressionRatio.toFixed(1) }}%
+          .flex.justify-between.border-t.border-stone-200.pt-1
+            span Est. DB size:
+            span.font-mono.font-medium {{ formatSize(estimatedDbSize) }}
+      .p-3.max-h-60svh.overflow-y-auto
+        .space-y-2(v-if="hasFiles")
+          .group.p-3.rounded-lg.border.cursor-pointer.transition-all.hover-shadow-sm(v-for="file in files", :key="file.name", @click="selectFile(file.name)", :class="file.active ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-stone-200 bg-white hover:border-stone-300'")
+            .flex.items-start.justify-between.mb-2
+              .flex-1.min-w-0
+                .font-medium.truncate(:class="file.active ? 'text-blue-700' : 'text-stone-800'").
+                  {{ file.name }}
 
-    // Sidebar - File list
-    .sidebar.bg-stone-100.rounded-lg.p-4
-      h3.m-0.mb-3.text-stone-800.flex.items-center.justify-between
-        span Files ({{ files.length }})
-        .text-xs.text-stone-500.font-normal {{hasFiles ? `${files.reduce((sum, f) => sum + f.size, 0) | formatSize} total` : 'No files'}}
+                .text-xs.text-stone-500.mt-1.
+                  {{ file.mime }}
 
-      .files-list.flex.flex-col.gap-2(v-if="hasFiles")
-        .file-item.rounded-md.p-3.border.border-stone-300.bg-white.cursor-pointer.transition(
-          v-for="file in files"
-          :key="file.name"
-          :class="{ 'border-blue-500 bg-blue-50 shadow-sm': file.active }"
-          @click="selectFile(file.name)"
-        )
-          .file-header.flex.items-start.justify-between(class="mb-1.5")
-            .file-name.font-600.text-stone-800.break-words.flex-1(:class="{ 'text-blue-600': file.active }") {{ file.name }}
-            .file-actions.flex.gap-1.opacity-70
-              button.p-1.rounded.hover-bg-stone-200(@click.stop="startRename(file.name)" title="Rename") ✏️
-              button.p-1.rounded.text-red-600.hover-bg-red-50(@click.stop="deleteFile(file.name)" title="Delete") 🗑️
+              .flex.gap-1.opacity-0.group-hover-opacity-100.transition-opacity
+                button.p-2.rounded.hover-bg-stone-200.transition(@click.stop="startRename(file.name)", title="Rename").
+                  ✏️
 
-          .file-meta.text-xs.text-stone-500.flex.items-center.justify-between
-            span {{ formatSize(file.size) }} • v{{ file.versions }}
-            span {{ formatDate(file.modified) }}
+                button.p-2.rounded.hover-bg-red-100.text-red-600.transition(@click.stop="confirmDelete(file.name)", title="Delete").
+                  🗑️
 
-          .file-type.text-xs.text-stone-400.mt-1 {{ file.mime }}
+            .flex.items-center.justify-between.text-xs.text-stone-500
+              .flex.flex-col.gap-1
+                span {{ file.active && contentText ? formatSize(contentText.length) : formatSize(file.size) }} • v{{ file.versions }}
+                span.text-green-600(v-if="file.compressedSize").
+                  {{ formatSize(file.compressedSize) }} (-{{ getCompressionRatio(file.size, file.compressedSize).toFixed(1) }}%)
 
-      .empty-state.text-center.py-10.px-5.text-stone-400(v-else)
-        div.text-6xl.mb-2 📁
-        p.m-0 No files yet
-        p.text-xs.mt-1 Create a new file or drop files here
+              span {{ formatDate(file.modified) }}
+        //  Empty State 
+        .text-center.py-12.px-4(v-else)
+          .text-5xl.mb-3 📁
+          p.text-stone-500.font-medium.mb-2 No files yet
+          p.text-xs.text-stone-400 Create a new file or drop files here
+    //  Editor Area 
+    .bg-white.rounded-lg.border.border-stone-200.flex.flex-col
+      //  Editor Header 
+      .px-6.py-4.border-b.border-stone-200.bg-stone-50(v-if="currentFile")
+        .flex.items-center.justify-between
+          .min-w-0.flex-1
+            h3.m-0.font-semibold.text-stone-800.truncate {{ currentFile }}
+            .text-xs.text-stone-500.mt-1.flex.items-center.gap-3
+              span {{ currentMime }}
+              span {{ formatSize(contentText.length) }}
+              span.text-green-600(v-if="files.find(f => f.active)?.compressedSize").
+                Stored: {{formatSize(files.find(f => f.active)?.compressedSize || 0)}}
 
-    // Main editor area
-    .editor-area.bg-white.rounded-lg.border.border-stone-300.flex.flex-col
+              span.text-orange-600.font-medium(v-if="isDirty") ● Unsaved
+          .flex.gap-2
+            button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.disabled-opacity-50.text-sm(@click="exportFile", :disabled="loading", title="Export file (Ctrl+E)").
+              📤 Export
 
-      // Editor header
-      .editor-header.px-5.py-4.border-b.border-stone-300.bg-stone-100(v-if="currentFile")
-        .file-info.flex.items-center.justify-between
-          .current-file
-            h3.m-0.text-stone-800 {{ currentFile }}
-            .file-details.text-xs.text-stone-500
-              span {{ currentMime }} • {{ formatSize(contentText.length) }}
-              span.text-green-600.ml-2(v-if="isDirty") ● Unsaved
+            button.px-3.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.disabled-opacity-50.transition.text-sm.font-medium(@click="saveFile", :disabled="loading || !isDirty", title="Save (Ctrl+S)").
+              💾 Save
 
-          .editor-actions.flex.gap-2
-            button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-100.transition(@click="exportFile" :disabled="loading" title="Export file")
-              | 📤 Export
-            button.px-3.py-2.rounded.border.border-blue-600.bg-blue-600.text-white.hover-bg-blue-700.transition(:disabled="loading || !isDirty" @click="saveFile" title="Save (Ctrl+S)")
-              | 💾 Save
+      //  Editor Content 
+      .flex-1.flex.flex-col
+        //  Text Editor 
+        textarea.flex-1.border-none.p-6.font-mono.text-sm.leading-relaxed.resize-none.outline-none.bg-white(v-if="canEdit", v-model="contentText", :disabled="loading", placeholder="Start typing your content...", spellcheck="false").
+          <!-- Image Preview -->
+          <div v-else-if="isImage && blobUrl" class="flex-1 flex items-center justify-center bg-stone-50 p-6">
+          <img :src="blobUrl" :alt="currentFile" class="max-w-full max-h-[70vh] object-contain rounded shadow-lg">
+          </div>
+          <!-- Binary File Info -->
+          <div v-else-if="currentFile" class="flex-1 flex flex-col items-center justify-center bg-stone-50 p-10 text-center">
+          <div class="text-6xl mb-4">📄</div>
+          <h4 class="m-0 mb-2 font-semibold text-stone-700">Binary File</h4>
+          <p class="m-0 text-stone-500 mb-4">{{ formatSize(contentBytes.length) }} • {{ currentMime }}</p>
+          <button @click="exportFile" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 transition">📤 Download File
+          </button>
+          </div>
+          <!-- Welcome Screen -->
+          <div v-else class="flex-1 flex flex-col items-center justify-center text-center p-10">
+          <div class="text-7xl mb-4">🔒</div>
+          <h2 class="m-0 mb-3 text-xl font-semibold text-stone-700">Welcome to Secure Vault</h2>
+          <p class="m-0 text-stone-500 mb-6 max-w-md">Select a file from the sidebar or create a new one to get started.
+          </p>
+          <div class="text-xs text-stone-400 space-y-1">
+          <p>Ctrl+N - New file</p>
+          <p>Ctrl+S - Save file</p>
+          <p>Ctrl+E - Export file</p>
+          <p>Drag & drop files to import</p>
+          </div>
+          </div>
+          </div>
+          </div>
+          </div>
+          <!-- Loading Screen -->
+          <div v-else class="flex flex-col items-center justify-center min-h-[500px] text-center">
+          <div class="text-7xl mb-4">🔒</div>
+          <h2 class="text-xl font-semibold text-stone-700 mb-2">Secure Vault</h2>
+          <p class="text-stone-500 mb-6">Initializing encrypted storage...</p>
+          <div v-if="loading" class="w-6 h-6 border-2 border-stone-300 border-t-blue-600 rounded-full animate-spin"></div>
+          </div>
+          <!-- Rename Dialog -->
+          <div v-if="showRenameDialog" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div class="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
+          <h3 class="m-0 mb-4 text-lg font-semibold text-stone-800">Rename File</h3>
+          <input v-model="newName" @keydown.enter="confirmRename" @keydown.escape="cancelRename" class="rename-input w-full px-3 py-2 border border-stone-300 rounded mb-4" type="text" placeholder="Enter new file name">
+          <div class="flex justify-end gap-3">
+          <button @click="cancelRename" class="px-4 py-2 rounded border border-stone-300 bg-white text-stone-700 hover:bg-stone-50 transition">Cancel
+          </button>
+          <button @click="confirmRename" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 transition">Rename
+          </button>
+          </div>
+          </div>
+          </div>
+          </div>
+          </template>
 
-      // Editor content
-      .editor-content.flex.flex-col.flex-1
+<style scoped>
+/* Custom scrollbar for file list */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
 
-        // Text editor
-        textarea.flex-1.border-none.p-5.font-mono.text-sm.leading-6.resize-none.outline-none.bg-white(
-          v-if="canEdit"
-          v-model="contentText"
-          :disabled="loading"
-          placeholder="Start typing your content..."
-          spellcheck="false"
-        )
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
 
-        // Image or binary view
-        template(v-else-if="currentFile")
-          // Image preview
-          .flex-1.flex.items-center.justify-center.bg-stone-50.p-6(v-if="isImage && blobUrl")
-            img.object-contain.rounded.shadow(class="max-w-full max-h-[70vh]" :src="blobUrl" :alt="currentFile")
-          // Generic binary info
-          .flex-1.flex.flex-col.items-center.justify-center.bg-stone-50.p-10(v-else)
-            .text-6xl.mb-2 📎
-            h4.m-0.mb-2.text-stone-700 Binary File
-            p.m-0.text-stone-500 {{ formatSize(contentText.length) }} • {{ currentMime }}
-            p.text-xs.text-stone-400.mt-2 Use Export to download this file
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
 
-        // Welcome screen
-        .welcome.flex-1.flex.flex-col.items-center.justify-center.text-stone-500.px-10.py-14(v-else)
-          div.text-7xl.mb-4 🔐
-          h2.m-0.mb-3.text-stone-700 Welcome to Secure Vault
-          p.m-0.text-base Select a file from the sidebar or create a new one to get started.
-          .shortcuts.mt-5.text-xs.text-stone-400
-            p.my-1 Ctrl+N - New file
-            p.my-1 Ctrl+S - Save file
-            p.my-1 Drag & drop - Import files
-
-  // Login prompt
-  .login-prompt.text-center.px-10.py-14(v-else)
-    div.text-7xl.mb-4 🔐
-    h2.text-stone-700.mb-2 Secure Vault
-    p.text-stone-500.mb-6 Initializing encrypted storage...
-    .inline-block.w-5.h-5.border-2.border-stone-300.border-t-blue-600.rounded-full.animate-spin(v-if="loading")
-</template>
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+</style>
