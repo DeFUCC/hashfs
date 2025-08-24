@@ -11,15 +11,24 @@
 	"display_override": ["window-controls-overlay", "minimal-ui", "standalone"],
 	"handle_links": "preferred",
 	"prefer_related_applications": false,
-	"categories": [
-		"productivity",
-		"utilities"
-	],
+	"categories": ["productivity", "utilities"],
 	"icons": [
 		{
-			"src": "./icon.svg",
+			"src": "./logo.svg",
 			"sizes": "any",
 			"type": "image/svg+xml",
+			"purpose": "any"
+		},
+		{
+			"src": "./logo.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "./logo1024.png",
+			"sizes": "1024x1024",
+			"type": "image/png",
 			"purpose": "any"
 		}
 	],
