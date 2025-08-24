@@ -1,6 +1,6 @@
 # HashFS 🔐
 
-**Zero-leak encrypted browser storage with cryptographic hash chains**
+**Encrypted browser storage**
 
 HashFS is a production-ready Vue 3 composable that provides military-grade encrypted file storage directly in your browser. It combines content-addressable storage, Ed25519 signatures, and cryptographic hash chains to create a zero-trust file vault with complete privacy - no servers, no tracking, no data leaks.
 
