@@ -1,12 +1,12 @@
 {
 	"name": "hashfs",
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"description": "Content-addressed secure file storage in a browser tab",
 	"type": "module",
-	"homepage": "https://github.com/davay42/hashfs",
+	"homepage": "https://github.com/defucc/hashfs",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/davay42/hashfs.git"
+		"url": "git+https://github.com/defucc/hashfs.git"
 	},
 	"author": "davay42 <davay@defucc.me>",
 	"packageManager": "pnpm@10.15.0",
