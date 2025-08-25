@@ -1,4 +1,4 @@
-<script setup>
+<script setup vapor>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useHashFS } from './index.js';
 
@@ -318,56 +318,47 @@ onBeforeUnmount(() => {
       //  Editor Content 
       .flex-1.flex.flex-col
         //  Text Editor 
-        textarea.flex-1.border-none.p-6.font-mono.text-sm.leading-relaxed.resize-none.outline-none.bg-white(v-if="canEdit", v-model="contentText", :disabled="loading", placeholder="Start typing your content...", spellcheck="false").
-          <!-- Image Preview -->
-          <div v-else-if="isImage && blobUrl" class="flex-1 flex items-center justify-center bg-stone-50 p-6">
-          <img :src="blobUrl" :alt="currentFile" class="max-w-full max-h-[70vh] object-contain rounded shadow-lg">
-          </div>
-          <!-- Binary File Info -->
-          <div v-else-if="currentFile" class="flex-1 flex flex-col items-center justify-center bg-stone-50 p-10 text-center">
-          <div class="text-6xl mb-4">📄</div>
-          <h4 class="m-0 mb-2 font-semibold text-stone-700">Binary File</h4>
-          <p class="m-0 text-stone-500 mb-4">{{ formatSize(contentBytes.length) }} • {{ currentMime }}</p>
-          <button @click="exportFile" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 transition">📤 Download File
-          </button>
-          </div>
-          <!-- Welcome Screen -->
-          <div v-else class="flex-1 flex flex-col items-center justify-center text-center p-10">
-          <div class="text-7xl mb-4">🔒</div>
-          <h2 class="m-0 mb-3 text-xl font-semibold text-stone-700">Welcome to Secure Vault</h2>
-          <p class="m-0 text-stone-500 mb-6 max-w-md">Select a file from the sidebar or create a new one to get started.
-          </p>
-          <div class="text-xs text-stone-400 space-y-1">
-          <p>Ctrl+N - New file</p>
-          <p>Ctrl+S - Save file</p>
-          <p>Ctrl+E - Export file</p>
-          <p>Drag & drop files to import</p>
-          </div>
-          </div>
-          </div>
-          </div>
-          </div>
-          <!-- Loading Screen -->
-          <div v-else class="flex flex-col items-center justify-center min-h-[500px] text-center">
-          <div class="text-7xl mb-4">🔒</div>
-          <h2 class="text-xl font-semibold text-stone-700 mb-2">Secure Vault</h2>
-          <p class="text-stone-500 mb-6">Initializing encrypted storage...</p>
-          <div v-if="loading" class="w-6 h-6 border-2 border-stone-300 border-t-blue-600 rounded-full animate-spin"></div>
-          </div>
-          <!-- Rename Dialog -->
-          <div v-if="showRenameDialog" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div class="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
-          <h3 class="m-0 mb-4 text-lg font-semibold text-stone-800">Rename File</h3>
-          <input v-model="newName" @keydown.enter="confirmRename" @keydown.escape="cancelRename" class="rename-input w-full px-3 py-2 border border-stone-300 rounded mb-4" type="text" placeholder="Enter new file name">
-          <div class="flex justify-end gap-3">
-          <button @click="cancelRename" class="px-4 py-2 rounded border border-stone-300 bg-white text-stone-700 hover:bg-stone-50 transition">Cancel
-          </button>
-          <button @click="confirmRename" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 transition">Rename
-          </button>
-          </div>
-          </div>
-          </div>
-          </div>
+        textarea.flex-1.border-none.p-6.font-mono.text-sm.leading-relaxed.resize-none.outline-none.bg-white(v-if="canEdit", v-model="contentText", :disabled="loading", placeholder="Start typing your content...", spellcheck="false")
+        .flex-1.flex.items-center.justify-center.bg-stone-50.p-6(v-else-if="isImage && blobUrl")
+          img.max-w-full.max-h-70vh.object-contain.rounded.shadow-lg(:src="blobUrl", :alt="currentFile")
+        //  Binary File Info 
+        .flex-1.flex.flex-col.items-center.justify-center.bg-stone-50.p-10.text-center(v-else-if="currentFile")
+          .text-6xl.mb-4 📄
+          h4.m-0.mb-2.font-semibold.text-stone-700 Binary File
+          p.m-0.text-stone-500.mb-4 {{ formatSize(contentBytes.length) }} • {{ currentMime }}
+          button.px-4.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.transition(@click="exportFile").
+            📤 Download File
+
+        //  Welcome Screen 
+        .flex-1.flex.flex-col.items-center.justify-center.text-center.p-10(v-else-if="!loading")
+          .text-7xl.mb-4 🔒
+          h2.m-0.mb-3.text-xl.font-semibold.text-stone-700 Welcome to Secure Vault
+          p.m-0.text-stone-500.mb-6.max-w-md.
+            Select a file from the sidebar or create a new one to get started.
+
+          .text-xs.text-stone-400.space-y-1
+            p Ctrl+N - New file
+            p Ctrl+S - Save file
+            p Ctrl+E - Export file
+            p Drag & drop files to import
+        //  Loading Screen 
+        .flex.flex-col.items-center.justify-center.min-h-300.text-center(v-else)
+          .text-7xl.mb-4 🔒
+          h2.text-xl.font-semibold.text-stone-700.mb-2 Secure Vault
+          p.text-stone-500.mb-6 Initializing encrypted storage...
+          .w-6.h-6.border-2.border-stone-300.border-t-blue-600.rounded-full.animate-spin(v-if="loading")
+        //  Rename Dialog 
+        .fixed.inset-0.bg-black-50.flex.items-center.justify-center.z-50.p-4(v-if="showRenameDialog")
+          .bg-white.rounded-lg.shadow-xl.w-full.max-w-md.p-6
+            h3.m-0.mb-4.text-lg.font-semibold.text-stone-800 Rename File
+            input.rename-input.w-full.px-3.py-2.border.border-stone-300.rounded.mb-4(v-model="newName", @keydown.enter="confirmRename", @keydown.escape="cancelRename", type="text", placeholder="Enter new file name")
+            .flex.justify-end.gap-3
+              button.px-4.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition(@click="cancelRename").
+                Cancel
+
+              button.px-4.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.transition(@click="confirmRename").
+                Rename
+              
           </template>
 
 <style scoped>
