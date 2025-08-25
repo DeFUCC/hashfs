@@ -27,11 +27,11 @@ watch(passphrase, (val) => {
 
 <template lang="pug">
 .font-mono.mx-auto.pt-20.flex.flex-col.gap-4
-  .p-4.text-center.flex.flex-col.gap-2(v-if="!passphrase")
+  form.p-4.text-center.flex.flex-col.gap-4.max-w-55ch.mx-auto(v-if="!passphrase" @submit.prevent="passphrase = inp; inp = null")
     .text-2xl HashFS
-    .text-lg Enter a passphrase to enter your vault
+    .text-lg Enter a passphrase  to enter your vault
     input.bg-light-100.p-4.rounded-lg.text-center(v-model="inp" type="password")
-    button.text-xl.p-4.shadow-lg.rounded-lg.bg-green-400(@click="passphrase = inp; inp = null") Enter
+    button.text-xl.p-4.shadow-lg.rounded-lg.bg-green-400(type="submit") Enter
   template(v-else)
     button.p-4.rounded-lg.absolute.top-4.right-4(@click="passphrase = null; inp = null")
       .i-lucide-x

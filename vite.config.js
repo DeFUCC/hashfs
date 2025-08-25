@@ -13,6 +13,9 @@ const filename = fileURLToPath(import.meta.url);
 const dirname = path.dirname(filename);
 
 export default defineConfig({
+	server: {
+		port: 7856
+	},
 	clearScreen: false,
 	preview: {
 		host: true,
