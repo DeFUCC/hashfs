@@ -52,9 +52,6 @@ export function useHashFS(passphrase) {
 
   async function login() {
     if (!String(passphrase || '').trim()) return;
-    if (!cryptoUtils.isSecureContext) {
-      throw new Error('Secure context required. Please use HTTPS or localhost.');
-    }
 
     loading.value = true;
     try {

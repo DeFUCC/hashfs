@@ -4,23 +4,14 @@ import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
 import { sha256 } from '@noble/hashes/sha256.js';
 import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
 import { randomBytes } from '@noble/hashes/utils.js';
+import { gcm } from '@noble/ciphers/aes.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 // Core crypto utilities
 export const cryptoUtils = {
-  get isSecureContext() {
-    return typeof window !== 'undefined' &&
-      window.isSecureContext &&
-      typeof window.crypto?.subtle !== 'undefined';
-  },
-
   async deriveKeys(pwd) {
-    if (!this.isSecureContext) {
-      throw new Error('Secure context required. Please use HTTPS or localhost.');
-    }
-
     const pwdBytes = encoder.encode(String(pwd || '').normalize('NFC').trim());
     if (pwdBytes.length < 8) throw new Error('Password too short');
 
@@ -28,12 +19,8 @@ export const cryptoUtils = {
     const masterKey = pbkdf2(sha256, pwdBytes, salt, { c: 120000, dkLen: 64 });
 
     const sigKey = masterKey.slice(0, 32);
-    const encKeyBytes = masterKey.slice(32, 64);
+    const encKey = masterKey.slice(32, 64); // 32-byte key
     const pubKey = ed25519.getPublicKey(sigKey);
-
-    const encKey = await window.crypto.subtle.importKey(
-      'raw', encKeyBytes, 'AES-GCM', false, ['encrypt', 'decrypt']
-    );
 
     const dbName = bytesToHex(sha256(pubKey).slice(0, 16)) + '-hashfs-v4';
 
@@ -51,18 +38,17 @@ export const cryptoUtils = {
   generateKey: () => 'sk_' + bytesToHex(randomBytes(12)),
   generateChainId: () => bytesToHex(randomBytes(16)).replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5'),
 
-  async encrypt(bytes, key) {
-    if (!this.isSecureContext) throw new Error('Encryption requires secure context');
+  async encrypt(bytes, keyBytes) {
     const iv = randomBytes(12);
-    const encrypted = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes);
-    return { iv, data: new Uint8Array(encrypted) };
+    const aes = gcm(keyBytes, iv);
+    const ciphertext = aes.encrypt(bytes);
+    return { iv, data: ciphertext };
   },
 
-  async decrypt(payload, key) {
-    if (!this.isSecureContext) throw new Error('Decryption requires secure context');
-    return new Uint8Array(await window.crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: payload.iv }, key, payload.data
-    ));
+  async decrypt(payload, keyBytes) {
+    const aes = gcm(keyBytes, payload.iv);
+    const plaintext = aes.decrypt(payload.data);
+    return new Uint8Array(plaintext);
   }
 };
 
