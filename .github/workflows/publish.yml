@@ -3,8 +3,11 @@ name: Publish to NPM
 on:
   push:
     tags:
-      - "v.*"
+      - "v*"
   workflow_dispatch:
+  repository_dispatch:
+    types:
+      - publishhook
 jobs:
   build:
     name: Build
