@@ -29,8 +29,8 @@ watch(passphrase, (val) => {
 <template lang="pug">
 .font-mono.mx-auto.pt-20.flex.flex-col.gap-4
   form.p-4.text-center.flex.flex-col.gap-4.max-w-55ch.mx-auto(v-if="!passphrase" @submit.prevent="passphrase = inp; inp = null")
-    .text-2xl HashFS
-    .text-lg Enter a passphrase  to enter your vault
+    .text-5xl HashFS
+    .text-lg Enter a long passphrase to open your vault
     input.bg-light-100.p-4.rounded-lg.text-center(v-model="inp" type="password")
     button.text-xl.p-4.shadow-lg.rounded-lg.bg-green-400(type="submit") Enter
     a.text-xs.op-40(href="https://www.npmjs.com/package/hashfs" target="_blank") v.{{ version }}
