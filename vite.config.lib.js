@@ -18,7 +18,7 @@ export default defineConfig({
 		lib: {
 			entry: ['main/useHashFS.js'],
 			formats: ['es'],
-			fileName: 'index.js'
+			fileName: 'index'
 		},
 		outDir: "./lib/",
 		sourcemap: false,
