@@ -28,8 +28,10 @@ watch(passphrase, (val) => {
 
 <template lang="pug">
 .font-mono.mx-auto.pt-20.flex.flex-col.gap-4
-  form.p-4.text-center.flex.flex-col.gap-4.max-w-55ch.mx-auto(v-if="!passphrase" @submit.prevent="passphrase = inp; inp = null")
-    .text-5xl HashFS
+  form.p-4.flex.flex-col.gap-4.max-w-55ch.mx-auto(v-if="!passphrase" @submit.prevent="passphrase = inp; inp = null")
+    .flex.items-baseline.gap-2
+      .text-5xl HashFS
+      .text-sm.op-50 v.{{ version }}
     .text-2xl Encrypted browser storage demo
     .text-lg Enter a long passphrase to open your vault
     input.bg-light-100.p-4.rounded-lg.text-center(v-model="inp" type="password")
@@ -38,9 +40,43 @@ watch(passphrase, (val) => {
     .text-sm.op-80 HashFS is a production-ready Vue 3 composable that provides military-grade encrypted file storage directly in your browser. It combines content-addressable storage, Ed25519 signatures, and cryptographic hash chains to create a zero-trust file vault with complete privacy - no servers, no tracking, no data leaks.
 
     .flex.items-center.w-full.text-center.gap-4.justify-center
-      a.text-sm.op-80 v.{{ version }}
-      a.text-sm.op-80(href="https://www.npmjs.com/package/hashfs" target="_blank") NPM
-      a.text-sm.op-80(href="https://github.com/DeFUCC/hashfs" target="_blank") GitHub
+      a.flex.items-center.gap-2.bg-stone-700.p-4.rounded-xl.shadow-lg.text-stone-100(href="https://www.npmjs.com/package/hashfs" target="_blank") 
+        .i-lucide-code
+        span NPM
+      a.flex.items-center.gap-2.bg-stone-700.p-4.rounded-xl.shadow-lg.text-stone-100(href="https://github.com/DeFUCC/hashfs" target="_blank") 
+        .i-lucide-github
+        span GitHub
+
+    .mx-auto.rounded-xl.bg-stone-600.text-stone-200.p-4 npm install hashfs
+    pre.w-full.rounded-xl.bg-stone-300.p-4. 
+      import { ref } from "vue";
+      import { useHashFS } from "hashfs";
+
+      const {
+        auth,
+        files,
+        stats,
+        importAll,
+        exportAll,
+        useFile
+      } = useHashFS("your-secure-passphrase")
+
+    pre.w-full.mx-auto.rounded-xl.bg-stone-300.p-4. 
+
+      const {
+        loading,
+        filename,
+        mime,
+        text,
+        bytes,
+        dirty,
+        load,
+        save,
+        rename,
+        delete,
+        import,
+        export
+      } = useFile()
 
   template(v-else)
     button.p-4.rounded-lg.absolute.top-4.right-4(@click="passphrase = null; inp = null")
