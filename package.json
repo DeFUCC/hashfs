@@ -6,7 +6,7 @@
 	"homepage": "https://github.com/defucc/hashfs",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/defucc/hashfs.git"
+		"url": "https://github.com/defucc/hashfs"
 	},
 	"author": "davay42 <davay@defucc.me>",
 	"packageManager": "pnpm@10.15.0",
