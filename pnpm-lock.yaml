@@ -17,9 +17,6 @@ importers:
       '@noble/hashes':
         specifier: ^1.8.0
         version: 1.8.0
-      '@scure/bip39':
-        specifier: ^1.6.0
-        version: 1.6.0
       '@unocss/reset':
         specifier: ^66.4.2
         version: 66.4.2
@@ -32,18 +29,9 @@ importers:
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
-      gun-avatar:
-        specifier: ^2.2.4
-        version: 2.2.4(bufferutil@4.0.9)(utf-8-validate@6.0.5)
       idb:
         specifier: ^8.0.3
         version: 8.0.3
-      marked:
-        specifier: ^16.2.0
-        version: 16.2.0
-      marked-highlight:
-        specifier: ^2.2.2
-        version: 2.2.2(marked@16.2.0)
       vue:
         specifier: 3.6.0-alpha.2
         version: 3.6.0-alpha.2
@@ -281,9 +269,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@gun-vue/gun-es@0.3.1240':
-    resolution: {integrity: sha512-a05ZdoTlZkV54pmUkMNC3fcmVZ38dQ27MZ1EC/UtSY9SHlFNpGqNy7sujUQJOCslz0DI304OeUo/zIwe0izfNA==}
-
   '@iconify-json/lucide@1.2.63':
     resolution: {integrity: sha512-4rRKhUhEh4TsBq5ypbimHbBA6ApIcDLR9gzjnJT2cvUn2+rG+oG4TPXgHLFmIaRkHKYcMKukdcfOUaJbM/G4pQ==}
 
@@ -310,10 +295,6 @@ packages:
     resolution: {integrity: sha512-2I0gnIVPtfnMw9ee9h1dJG7tp81+8Ob3OJb3Mv37rx5L40/b0i7djjCVvGOVqc9AEIQyvyu1i6ypKdFw8R8gQw==}
     engines: {node: ^14.21.3 || >=16}
 
-  '@noble/curves@1.9.0':
-    resolution: {integrity: sha512-7YDlXiNMdO1YZeH6t/kvopHHbIZzlxrCV9WLqCY6QhcXOoXiNCMDqJIglZ9Yjx5+w7Dz30TITFrlTjnRg7sKEg==}
-    engines: {node: ^14.21.3 || >=16}
-
   '@noble/curves@1.9.7':
     resolution: {integrity: sha512-gbKGcRUYIjA3/zCCNaWDciTMFI0dCkvou3TL8Zmy5Nc7sJ47a0jtOeZoTaMxkuqRo9cRhjOdZJXegxYE5FN/xw==}
     engines: {node: ^14.21.3 || >=16}
@@ -321,17 +302,6 @@ packages:
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
-
-  '@peculiar/asn1-schema@2.4.0':
-    resolution: {integrity: sha512-umbembjIWOrPSOzEGG5vxFLkeM8kzIhLkgigtsOrfLKnuzxWxejAcUX+q/SoZCdemlODOcr5WiYa7+dIEzBXZQ==}
-
-  '@peculiar/json-schema@1.1.12':
-    resolution: {integrity: sha512-coUfuoMeIB7B8/NMekxaDzLhaYmp0HZNPEjYRm9goRou8UZIC3z21s0sL9AWoCw4EG876QyO3kYrc61WNF9B/w==}
-    engines: {node: '>=8.0.0'}
-
-  '@peculiar/webcrypto@1.5.0':
-    resolution: {integrity: sha512-BRs5XUAwiyCDQMsVA9IDvDa7UBR9gAvPHgugOeGng3YN6vJ9JYonyDc0lNczErgtCWtucjR5N7VtaonboD/ezg==}
-    engines: {node: '>=10.12.0'}
 
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
@@ -441,12 +411,6 @@ packages:
     resolution: {integrity: sha512-CpKnYa8eHthJa3c+C38v/E+/KZyF1Jdh2Cz3DyKZqEWYgrM1IHFArXNWvBLPQCKUEsAqqKX27tTqVEFbDNUcOA==}
     cpu: [x64]
     os: [win32]
-
-  '@scure/base@1.2.6':
-    resolution: {integrity: sha512-g/nm5FgUa//MCj1gV09zTJTaM6KBAHqLN907YVQqf7zC49+DcO4B1so4ZX07Ef10Twr6nuqYEH9GEggFXA4Fmg==}
-
-  '@scure/bip39@1.6.0':
-    resolution: {integrity: sha512-+lF0BbLiJNwVlev4eKelw1WWLaiKXw7sSl8T6FvBlWkdX+94aGJ4o8XjUdlyhTCjd8c+B3KT3JfS8P0bLRNU6A==}
 
   '@silentbot1/nat-api@0.4.8':
     resolution: {integrity: sha512-DBz/1gGzaYIbUdGTBQ7l4NrI7a+DFZgdZShmjmBGgJR4PvQ64wKNMwle2rrW8pdiOesN+DV6/8ZN/PLuksNyTg==}
@@ -611,20 +575,11 @@ packages:
   '@vue/language-plugin-pug@3.0.6':
     resolution: {integrity: sha512-6HEy4KSh1/OA6CQHN42SkIymgK1tqfV3FeGuAeR4Y4eGf0udV27LYmNcHs8N52ssU8ThpNK1bNY9ME+QtCy8Og==}
 
-  '@vue/reactivity@3.5.19':
-    resolution: {integrity: sha512-4bueZg2qs5MSsK2dQk3sssV0cfvxb/QZntTC8v7J448GLgmfPkQ+27aDjlt40+XFqOwUq5yRxK5uQh14Fc9eVA==}
-
   '@vue/reactivity@3.6.0-alpha.2':
     resolution: {integrity: sha512-dqCEZHz7dy5u0fZV1ILObnH2YCA+I6UHuOt7PLGb1NBEAAUbO251nOK9OfecZEEPsvMJRl3P9rNqdJmAvIcHTg==}
 
-  '@vue/runtime-core@3.5.19':
-    resolution: {integrity: sha512-TaooCr8Hge1sWjLSyhdubnuofs3shhzZGfyD11gFolZrny76drPwBVQj28/z/4+msSFb18tOIg6VVVgf9/IbIA==}
-
   '@vue/runtime-core@3.6.0-alpha.2':
     resolution: {integrity: sha512-OPEIqs/q2rTZWTJm8VVSsI9B2OgsKdtprKEqzw3L74tBGDwNRleCGxGxu2T3LUpPlOtQFkSCZTIh1M52/6PG0w==}
-
-  '@vue/runtime-dom@3.5.19':
-    resolution: {integrity: sha512-qmahqeok6ztuUTmV8lqd7N9ymbBzctNF885n8gL3xdCC1u2RnM/coX16Via0AiONQXUoYpxPojL3U1IsDgSWUQ==}
 
   '@vue/runtime-dom@3.6.0-alpha.2':
     resolution: {integrity: sha512-oYrpDYpbRqv/pgqM1SJEN7w9oahCjj6Txatz7McMJ++CX0WyFqAChi3Zvxr06Vrte+OCWA86t6Ot8K+mKV0QAA==}
@@ -633,11 +588,6 @@ packages:
     resolution: {integrity: sha512-UdGN6tcXIMTD/OFR7qI8V+ID4lji7K5A90i68OjiCr8nevtGxjfYPB3Lz5Lg7S6sckPCnFTECHExzWOmE7aV0A==}
     peerDependencies:
       '@vue/runtime-dom': 3.6.0-alpha.2
-
-  '@vue/server-renderer@3.5.19':
-    resolution: {integrity: sha512-ZJ/zV9SQuaIO+BEEVq/2a6fipyrSYfjKMU3267bPUk+oTx/hZq3RzV7VCh0Unlppt39Bvh6+NzxeopIFv4HJNg==}
-    peerDependencies:
-      vue: 3.5.19
 
   '@vue/server-renderer@3.6.0-alpha.2':
     resolution: {integrity: sha512-Zw+fX/FlRqfwzrv5EmCyLBN5bOZWsRo3SnxQKqPl1yA5xGDe+FIe9cjII/X7hlFdC9Vb4lmQBvOQSnTeTj8ygA==}
@@ -690,10 +640,6 @@ packages:
 
   asap@2.0.6:
     resolution: {integrity: sha512-BSHWgDSAiKs50o2Re8ppvp3seVHXSRM44cdSsT9FfNEUUZLOGWVCsiWaRPWM1Znn+mqZ1OfVZ3z3DWEzSp7hRA==}
-
-  asn1js@3.0.6:
-    resolution: {integrity: sha512-UOCGPYbl0tv8+006qks/dTgV9ajs97X2p0FAbyS2iyCRrmLSRolDaHdp+v/CLgnzHc3fVB+CwYiUmei7ndFcgA==}
-    engines: {node: '>=12.0.0'}
 
   assert-never@1.4.0:
     resolution: {integrity: sha512-5oJg84os6NMQNl27T9LnZkvvqzvAnHu03ShCnoj6bsJwS7L8AO4lf+C/XjK/nvzEqQB744moC6V128RucQd1jA==}
@@ -878,10 +824,6 @@ packages:
 
   cpus@1.0.3:
     resolution: {integrity: sha512-PXHBvGLuL69u55IkLa5e5838fLhIMHxmkV4ge42a8alGyn7BtawYgI0hQ849EedvtHIOLNNH3i6eQU1BiE9SUA==}
-
-  crc-32@0.3.0:
-    resolution: {integrity: sha512-kucVIjOmMc1f0tv53BJ/5WIX+MGLcKuoBhnGqQrgKJNqLByb/sVMWfW/Aw6hw0jgcqjJ2pi9E5y32zOIpaUlsA==}
-    engines: {node: '>=0.8'}
 
   create-torrent@6.1.0:
     resolution: {integrity: sha512-War593HCsg4TotHgMGWTJqnDHN0pmEU2RM13xUzzSZ78TpRNOC2bbcsC5yMO3pqIkedHEWFzYNqH1yhwuuBYTg==}
@@ -1084,13 +1026,6 @@ packages:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
 
-  gun-avatar@2.2.4:
-    resolution: {integrity: sha512-2mjCI4AC+vkd0aLLbCV79RI44I9ALLNXgVNCoJb/tfUhWct4IVOL/BJjwHFeEu8REnOjx1zDYDMBUJZalu4EKA==}
-
-  gun@0.2020.1240:
-    resolution: {integrity: sha512-uhnyadZTywn0HHgBjS2DePqpcdwLeVm6nFeSZZBPJRltm9O8MjFPyltaxk2PBKS+O8wSZac9qlbCIriJDgQQog==}
-    engines: {node: '>=0.8.4'}
-
   gzip-size@6.0.0:
     resolution: {integrity: sha512-ax7ZYomf6jqPTQ4+XCpUGyXKHk5WweS+e05MBO4/y3WJ5RkmPXNKvX+bx1behVILVwr6JSQvZAku021CHPXG3Q==}
     engines: {node: '>=10'}
@@ -1248,16 +1183,6 @@ packages:
   magnet-uri@7.0.7:
     resolution: {integrity: sha512-z/+dB2NQsXaDuxVBjoPLpZT8ePaacUmoontoFheRBl++nALHYs4qV9MmhTur9e4SaMbkCR/uPX43UMzEOoeyaw==}
     engines: {node: '>=12.20.0'}
-
-  marked-highlight@2.2.2:
-    resolution: {integrity: sha512-KlHOP31DatbtPPXPaI8nx1KTrG3EW0Z5zewCwpUj65swbtKOTStteK3sNAjBqV75Pgo3fNEVNHeptg18mDuWgw==}
-    peerDependencies:
-      marked: '>=4 <17'
-
-  marked@16.2.0:
-    resolution: {integrity: sha512-LbbTuye+0dWRz2TS9KJ7wsnD4KAtpj0MVkWc90XvBa6AslXsT0hTBVH5k32pcSyHH1fst9XEFJunXHktVy0zlg==}
-    engines: {node: '>= 20'}
-    hasBin: true
 
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
@@ -1419,15 +1344,6 @@ packages:
   pkg-types@2.3.0:
     resolution: {integrity: sha512-SIqCzDRg0s9npO5XQ3tNZioRY1uK06lA41ynBC1YmFTmnY6FjUjVt6s4LoADmwoig1qqD0oK8h1p/8mlMx8Oig==}
 
-  png-chunk-text@1.0.0:
-    resolution: {integrity: sha512-DEROKU3SkkLGWNMzru3xPVgxyd48UGuMSZvioErCure6yhOc/pRH2ZV+SEn7nmaf7WNf3NdIpH+UTrRdKyq9Lw==}
-
-  png-chunks-encode@1.0.0:
-    resolution: {integrity: sha512-J1jcHgbQRsIIgx5wxW9UmCymV3wwn4qCCJl6KYgEU/yHCh/L2Mwq/nMOkRPtmV79TLxRZj5w3tH69pvygFkDqA==}
-
-  png-chunks-extract@1.0.0:
-    resolution: {integrity: sha512-ZiVwF5EJ0DNZyzAqld8BP1qyJBaGOFaq9zl579qfbkcmOwWLLO4I9L8i2O4j3HkI6/35i0nKG2n+dZplxiT89Q==}
-
   postcss@8.5.6:
     resolution: {integrity: sha512-3Ybi1tAuwAP9s0r1UQ2J4n5Y0G05bJkpUIO0/bI9MhwmD70S5aTWbXGBwxHrelT+XM1k6dM0pk+SwNkpTRN7Pg==}
     engines: {node: ^10 || ^12 || >=14}
@@ -1478,13 +1394,6 @@ packages:
 
   pump@3.0.3:
     resolution: {integrity: sha512-todwxLMY7/heScKmntwQG8CXVkWUOdYxIvY2s0VWAAMh/nd8SoYiRaKjlr7+iCs984f2P8zvrfWcDDYVb73NfA==}
-
-  pvtsutils@1.3.6:
-    resolution: {integrity: sha512-PLgQXQ6H2FWCaeRak8vvk1GW462lMxB5s3Jm673N82zI4vqtVUPuZdffdZbPDFRoU8kAhItWFtPCWiPpp4/EDg==}
-
-  pvutils@1.1.3:
-    resolution: {integrity: sha512-pMpnA0qRdFp32b1sJl1wOJNxZLQ2cbQx+k6tjNtZ8CpvVhNqEPRgivZ2WOUev2YMajecdH7ctUPDvEe87nariQ==}
-    engines: {node: '>=6.0.0'}
 
   quansync@0.2.11:
     resolution: {integrity: sha512-AifT7QEbW9Nri4tAwR5M/uzpBuqfZf+zwaEM/QkzEjj7NBuFD2rBuy0K3dE+8wltbezDV7JMA0WfnCPYRSYbXA==}
@@ -1585,9 +1494,6 @@ packages:
     resolution: {integrity: sha512-FoqMu0NCGBLCcAkS1qA+XJIQTR6/JHfQXl+uGteNCQ76T91DMUjPa9xfmeqMY3z80nLSg9yQmNjK0Px6RWsH/A==}
     engines: {node: '>=18'}
 
-  sliced@1.0.1:
-    resolution: {integrity: sha512-VZBmZP8WU3sMOZm1bdgTadsQbcscK0UM8oKxKVBs4XAhUo2Xxzm/OFMGBkPusxw9xL3Uy8LrzEqGqJhclsr0yA==}
-
   smart-buffer@4.2.0:
     resolution: {integrity: sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==}
     engines: {node: '>= 6.0.0', npm: '>= 3.0.0'}
@@ -1675,9 +1581,6 @@ packages:
   totalist@3.0.1:
     resolution: {integrity: sha512-sf4i37nQ2LBx4m3wB74y+ubopq6W/dIzXg0FDGjsYnZHVa1Da8FH853wlL2gtUhg+xJXjfk3kUZS3BRoQeoQBQ==}
     engines: {node: '>=6'}
-
-  tslib@2.8.1:
-    resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
   tunnel-agent@0.6.0:
     resolution: {integrity: sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w==}
@@ -1817,14 +1720,6 @@ packages:
   vue-flow-layout@0.2.0:
     resolution: {integrity: sha512-zKgsWWkXq0xrus7H4Mc+uFs1ESrmdTXlO0YNbR6wMdPaFvosL3fMB8N7uTV308UhGy9UvTrGhIY7mVz9eN+L0Q==}
 
-  vue@3.5.19:
-    resolution: {integrity: sha512-ZRh0HTmw6KChRYWgN8Ox/wi7VhpuGlvMPrHjIsdRbzKNgECFLzy+dKL5z9yGaBSjCpmcfJCbh3I1tNSRmBz2tg==}
-    peerDependencies:
-      typescript: '*'
-    peerDependenciesMeta:
-      typescript:
-        optional: true
-
   vue@3.6.0-alpha.2:
     resolution: {integrity: sha512-xn3jwLo6eMqxEKEAW8TWX+KSm7K2jTrNZ5Q3+H5Bu9P3mkoz8w0lUQHrO5WcnSVZfmR7vvw4/5XSYQe2XeDzdw==}
     peerDependencies:
@@ -1836,9 +1731,6 @@ packages:
   web-streams-polyfill@3.3.3:
     resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==}
     engines: {node: '>= 8'}
-
-  webcrypto-core@1.8.1:
-    resolution: {integrity: sha512-P+x1MvlNCXlKbLSOY4cYrdreqPG5hbzkmawbcXLKN/mf6DZW0SdNNkZ+sjwsqVkI4A4Ko2sPZmkZtCKY58w83A==}
 
   webrtc-polyfill@1.1.10:
     resolution: {integrity: sha512-sOn0bj3/noUdzQX7rvk0jFbBurqWDGGo2ipl+WfgoOe/x3cxbGLk/ZUY+WHCISSlLaIeBumi1X3wxQZnUESExQ==}
@@ -1862,18 +1754,6 @@ packages:
 
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
-
-  ws@7.5.10:
-    resolution: {integrity: sha512-+dbF1tHwZpXcbOJdVOkzLDxZP1ailvSxM6ZweXTegylPny803bFhA+vqBYw4s31NSAk4S2Qz+AKXK9a4wkdjcQ==}
-    engines: {node: '>=8.3.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: ^5.0.2
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
 
   ws@8.18.3:
     resolution: {integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==}
@@ -2034,14 +1914,6 @@ snapshots:
   '@esbuild/win32-x64@0.25.9':
     optional: true
 
-  '@gun-vue/gun-es@0.3.1240(bufferutil@4.0.9)(utf-8-validate@6.0.5)':
-    dependencies:
-      '@noble/curves': 1.9.0
-      gun: 0.2020.1240(bufferutil@4.0.9)(utf-8-validate@6.0.5)
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
   '@iconify-json/lucide@1.2.63':
     dependencies:
       '@iconify/types': 2.0.0
@@ -2077,36 +1949,11 @@ snapshots:
 
   '@noble/ciphers@1.3.0': {}
 
-  '@noble/curves@1.9.0':
-    dependencies:
-      '@noble/hashes': 1.8.0
-
   '@noble/curves@1.9.7':
     dependencies:
       '@noble/hashes': 1.8.0
 
   '@noble/hashes@1.8.0': {}
-
-  '@peculiar/asn1-schema@2.4.0':
-    dependencies:
-      asn1js: 3.0.6
-      pvtsutils: 1.3.6
-      tslib: 2.8.1
-    optional: true
-
-  '@peculiar/json-schema@1.1.12':
-    dependencies:
-      tslib: 2.8.1
-    optional: true
-
-  '@peculiar/webcrypto@1.5.0':
-    dependencies:
-      '@peculiar/asn1-schema': 2.4.0
-      '@peculiar/json-schema': 1.1.12
-      pvtsutils: 1.3.6
-      tslib: 2.8.1
-      webcrypto-core: 1.8.1
-    optional: true
 
   '@polka/url@1.0.0-next.29': {}
 
@@ -2175,13 +2022,6 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.47.1':
     optional: true
-
-  '@scure/base@1.2.6': {}
-
-  '@scure/bip39@1.6.0':
-    dependencies:
-      '@noble/hashes': 1.8.0
-      '@scure/base': 1.2.6
 
   '@silentbot1/nat-api@0.4.8':
     dependencies:
@@ -2473,30 +2313,14 @@ snapshots:
       '@volar/source-map': 2.4.23
       volar-service-pug: 0.0.65
 
-  '@vue/reactivity@3.5.19':
-    dependencies:
-      '@vue/shared': 3.5.19
-
   '@vue/reactivity@3.6.0-alpha.2':
     dependencies:
       '@vue/shared': 3.6.0-alpha.2
-
-  '@vue/runtime-core@3.5.19':
-    dependencies:
-      '@vue/reactivity': 3.5.19
-      '@vue/shared': 3.5.19
 
   '@vue/runtime-core@3.6.0-alpha.2':
     dependencies:
       '@vue/reactivity': 3.6.0-alpha.2
       '@vue/shared': 3.6.0-alpha.2
-
-  '@vue/runtime-dom@3.5.19':
-    dependencies:
-      '@vue/reactivity': 3.5.19
-      '@vue/runtime-core': 3.5.19
-      '@vue/shared': 3.5.19
-      csstype: 3.1.3
 
   '@vue/runtime-dom@3.6.0-alpha.2':
     dependencies:
@@ -2511,12 +2335,6 @@ snapshots:
       '@vue/runtime-dom': 3.6.0-alpha.2
       '@vue/shared': 3.6.0-alpha.2
 
-  '@vue/server-renderer@3.5.19(vue@3.5.19)':
-    dependencies:
-      '@vue/compiler-ssr': 3.5.19
-      '@vue/shared': 3.5.19
-      vue: 3.5.19
-
   '@vue/server-renderer@3.6.0-alpha.2(vue@3.6.0-alpha.2)':
     dependencies:
       '@vue/compiler-ssr': 3.6.0-alpha.2
@@ -2527,13 +2345,6 @@ snapshots:
 
   '@vue/shared@3.6.0-alpha.2': {}
 
-  '@vueuse/core@13.7.0(vue@3.5.19)':
-    dependencies:
-      '@types/web-bluetooth': 0.0.21
-      '@vueuse/metadata': 13.7.0
-      '@vueuse/shared': 13.7.0(vue@3.5.19)
-      vue: 3.5.19
-
   '@vueuse/core@13.7.0(vue@3.6.0-alpha.2)':
     dependencies:
       '@types/web-bluetooth': 0.0.21
@@ -2542,10 +2353,6 @@ snapshots:
       vue: 3.6.0-alpha.2
 
   '@vueuse/metadata@13.7.0': {}
-
-  '@vueuse/shared@13.7.0(vue@3.5.19)':
-    dependencies:
-      vue: 3.5.19
 
   '@vueuse/shared@13.7.0(vue@3.6.0-alpha.2)':
     dependencies:
@@ -2572,13 +2379,6 @@ snapshots:
       picomatch: 2.3.1
 
   asap@2.0.6: {}
-
-  asn1js@3.0.6:
-    dependencies:
-      pvtsutils: 1.3.6
-      pvutils: 1.1.3
-      tslib: 2.8.1
-    optional: true
 
   assert-never@1.4.0: {}
 
@@ -2804,8 +2604,6 @@ snapshots:
 
   cpus@1.0.3: {}
 
-  crc-32@0.3.0: {}
-
   create-torrent@6.1.0:
     dependencies:
       bencode: 4.0.0
@@ -3025,29 +2823,6 @@ snapshots:
 
   gopd@1.2.0: {}
 
-  gun-avatar@2.2.4(bufferutil@4.0.9)(utf-8-validate@6.0.5):
-    dependencies:
-      '@gun-vue/gun-es': 0.3.1240(bufferutil@4.0.9)(utf-8-validate@6.0.5)
-      '@unocss/reset': 66.4.2
-      '@vueuse/core': 13.7.0(vue@3.5.19)
-      png-chunk-text: 1.0.0
-      png-chunks-encode: 1.0.0
-      png-chunks-extract: 1.0.0
-      vue: 3.5.19
-    transitivePeerDependencies:
-      - bufferutil
-      - typescript
-      - utf-8-validate
-
-  gun@0.2020.1240(bufferutil@4.0.9)(utf-8-validate@6.0.5):
-    dependencies:
-      ws: 7.5.10(bufferutil@4.0.9)(utf-8-validate@6.0.5)
-    optionalDependencies:
-      '@peculiar/webcrypto': 1.5.0
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
   gzip-size@6.0.0:
     dependencies:
       duplexer: 0.1.2
@@ -3200,12 +2975,6 @@ snapshots:
       bep53-range: 2.0.0
       uint8-util: 2.2.5
 
-  marked-highlight@2.2.2(marked@16.2.0):
-    dependencies:
-      marked: 16.2.0
-
-  marked@16.2.0: {}
-
   math-intrinsics@1.1.0: {}
 
   mdn-data@2.12.2: {}
@@ -3340,17 +3109,6 @@ snapshots:
       exsolve: 1.0.7
       pathe: 2.0.3
 
-  png-chunk-text@1.0.0: {}
-
-  png-chunks-encode@1.0.0:
-    dependencies:
-      crc-32: 0.3.0
-      sliced: 1.0.1
-
-  png-chunks-extract@1.0.0:
-    dependencies:
-      crc-32: 0.3.0
-
   postcss@8.5.6:
     dependencies:
       nanoid: 3.3.11
@@ -3447,14 +3205,6 @@ snapshots:
     dependencies:
       end-of-stream: 1.4.5
       once: 1.4.0
-
-  pvtsutils@1.3.6:
-    dependencies:
-      tslib: 2.8.1
-    optional: true
-
-  pvutils@1.1.3:
-    optional: true
 
   quansync@0.2.11: {}
 
@@ -3584,8 +3334,6 @@ snapshots:
       mrmime: 2.0.1
       totalist: 3.0.1
 
-  sliced@1.0.1: {}
-
   smart-buffer@4.2.0: {}
 
   socks@2.8.7:
@@ -3682,9 +3430,6 @@ snapshots:
       uint8-util: 2.2.5
 
   totalist@3.0.1: {}
-
-  tslib@2.8.1:
-    optional: true
 
   tunnel-agent@0.6.0:
     dependencies:
@@ -3831,14 +3576,6 @@ snapshots:
 
   vue-flow-layout@0.2.0: {}
 
-  vue@3.5.19:
-    dependencies:
-      '@vue/compiler-dom': 3.5.19
-      '@vue/compiler-sfc': 3.5.19
-      '@vue/runtime-dom': 3.5.19
-      '@vue/server-renderer': 3.5.19(vue@3.5.19)
-      '@vue/shared': 3.5.19
-
   vue@3.6.0-alpha.2:
     dependencies:
       '@vue/compiler-dom': 3.6.0-alpha.2
@@ -3849,15 +3586,6 @@ snapshots:
       '@vue/shared': 3.6.0-alpha.2
 
   web-streams-polyfill@3.3.3: {}
-
-  webcrypto-core@1.8.1:
-    dependencies:
-      '@peculiar/asn1-schema': 2.4.0
-      '@peculiar/json-schema': 1.1.12
-      asn1js: 3.0.6
-      pvtsutils: 1.3.6
-      tslib: 2.8.1
-    optional: true
 
   webrtc-polyfill@1.1.10:
     dependencies:
@@ -3926,11 +3654,6 @@ snapshots:
       babel-walk: 3.0.0-canary-5
 
   wrappy@1.0.2: {}
-
-  ws@7.5.10(bufferutil@4.0.9)(utf-8-validate@6.0.5):
-    optionalDependencies:
-      bufferutil: 4.0.9
-      utf-8-validate: 6.0.5
 
   ws@8.18.3(bufferutil@4.0.9)(utf-8-validate@6.0.5):
     optionalDependencies:
