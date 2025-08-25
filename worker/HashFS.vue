@@ -49,6 +49,7 @@ async function createFile() {
 async function selectFile(name) {
   if (currentFile.value?.isDirty) await currentFile.value.save();
   currentFile.value = storage.useFile(name);
+  await currentFile.value.load();
 }
 
 async function importFiles(files) {

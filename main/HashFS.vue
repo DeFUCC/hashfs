@@ -1,6 +1,6 @@
 <script setup vapor>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { useHashFS } from './index.js';
+import { useHashFS } from './useHashFS.js';
 
 const props = defineProps({
   passphrase: { type: String, required: true }

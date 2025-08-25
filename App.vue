@@ -1,6 +1,6 @@
 <script setup vapor>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
-import HashFS from './HashFS.vue';
+import HashFS from './main/HashFS.vue';
 
 const inp = ref('')
 const passphrase = ref(null)
