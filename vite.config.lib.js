@@ -25,9 +25,13 @@ export default defineConfig({
 		assetsInlineLimit: 100000000,
 		chunkSizeWarningLimit: 100000000,
 		rollupOptions: {
+			external: ['vue'],
 			output: {
 				inlineDynamicImports: true,
-			},
+				globals: {
+					vue: 'Vue'
+				}
+			}
 		}
 	},
 	worker: {

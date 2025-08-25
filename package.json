@@ -26,6 +26,9 @@
 		"fflate": "^0.8.2",
 		"idb": "^8.0.3"
 	},
+	"peerDependencies": {
+		"vue": "^3.5.0"
+	},
 	"devDependencies": {
 		"vue": "3.6.0-alpha.2",
 		"@vue/compiler-sfc": "^3.5.19",

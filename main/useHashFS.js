@@ -1,4 +1,4 @@
-import { ref, computed, reactive, onBeforeUnmount, watch } from 'vue';
+import { ref, computed, reactive, onBeforeUnmount } from 'vue';
 import { openDB } from 'idb';
 import { cryptoUtils, compress, createChainManager } from './crypto.js';
 
