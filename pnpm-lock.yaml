@@ -17,27 +17,12 @@ importers:
       '@noble/hashes':
         specifier: ^1.8.0
         version: 1.8.0
-      '@unocss/reset':
-        specifier: ^66.4.2
-        version: 66.4.2
-      '@vue/compiler-sfc':
-        specifier: ^3.5.19
-        version: 3.5.19
-      '@vueuse/core':
-        specifier: ^13.7.0
-        version: 13.7.0(vue@3.6.0-alpha.2)
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
       idb:
         specifier: ^8.0.3
         version: 8.0.3
-      vue:
-        specifier: 3.6.0-alpha.2
-        version: 3.6.0-alpha.2
-      webtorrent:
-        specifier: ^2.8.4
-        version: 2.8.4
     devDependencies:
       '@iconify-json/lucide':
         specifier: ^1.2.63
@@ -45,12 +30,21 @@ importers:
       '@unocss/extractor-pug':
         specifier: ^66.4.2
         version: 66.4.2(pug@3.0.3)
+      '@unocss/reset':
+        specifier: ^66.4.2
+        version: 66.4.2
       '@vitejs/plugin-vue':
         specifier: ^6.0.1
         version: 6.0.1(vite@7.1.3(jiti@2.5.1))(vue@3.6.0-alpha.2)
+      '@vue/compiler-sfc':
+        specifier: ^3.5.19
+        version: 3.5.19
       '@vue/language-plugin-pug':
         specifier: ^3.0.6
         version: 3.0.6
+      '@vueuse/core':
+        specifier: ^13.7.0
+        version: 13.7.0(vue@3.6.0-alpha.2)
       pug:
         specifier: ^3.0.3
         version: 3.0.3
@@ -63,6 +57,12 @@ importers:
       vite-plugin-singlefile:
         specifier: ^2.3.0
         version: 2.3.0(rollup@4.47.1)(vite@7.1.3(jiti@2.5.1))
+      vue:
+        specifier: 3.6.0-alpha.2
+        version: 3.6.0-alpha.2
+      webtorrent:
+        specifier: ^2.8.4
+        version: 2.8.4
 
 packages:
 

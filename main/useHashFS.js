@@ -1,63 +1,58 @@
-import { ref, computed, onBeforeUnmount, reactive } from 'vue';
+import { ref, computed, reactive, onBeforeUnmount, watch } from 'vue';
 import { openDB } from 'idb';
 import { cryptoUtils, compress, createChainManager } from './crypto.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export function useHashFS(passphrase) {
-  const auth = ref(false);
-  const keys = ref(null);
-  const db = ref(null);
+// Global state for the filesystem
+const globalState = {
+  auth: ref(false),
+  keys: ref(null),
+  db: ref(null),
+  chainManager: ref(null),
+  metadata: reactive({ files: {} })
+};
+
+export function useHashFS(passphrase, options = {}) {
   const loading = ref(false);
-  const chainManager = ref(null);
+  const fileInstances = new Map(); // Track active file instances
 
-  const metadata = reactive({ files: {} });
-  const current = reactive({
-    name: '',
-    mime: 'text/markdown',
-    bytes: new Uint8Array(),
-    dirty: false
-  });
-
-  let saveTimer = null;
-  const scheduleAutoSave = () => {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveFile, 800);
-  };
-
-  const filesList = computed(() =>
-    Object.entries(metadata.files).map(([name, meta]) => ({
+  // Computed stats
+  const files = computed(() =>
+    Object.entries(globalState.metadata.files).map(([name, meta]) => ({
       name,
-      mime: meta.mime || 'text/markdown',
+      mime: meta.mime || 'text/plain',
       versions: meta.headVersion || 0,
       size: meta.lastSize || 0,
       compressedSize: meta.lastCompressedSize || 0,
-      modified: meta.lastModified || 0,
-      active: current.name === name
+      modified: meta.lastModified || 0
     })).sort((a, b) => a.name.localeCompare(b.name))
   );
 
-  const contentText = computed({
-    get: () => {
-      try { return decoder.decode(current.bytes); }
-      catch { return ''; }
-    },
-    set: (text) => {
-      current.bytes = encoder.encode(text || '');
-      current.dirty = true;
-      scheduleAutoSave();
-    }
+  const stats = computed(() => {
+    const totalSize = files.value.reduce((sum, f) => sum + f.size, 0);
+    const compressedSize = files.value.reduce((sum, f) => sum + f.compressedSize, 0);
+    const compressionRatio = totalSize > 0 ? ((totalSize - compressedSize) / totalSize) * 100 : 0;
+
+    return {
+      fileCount: files.value.length,
+      totalSize,
+      compressedSize,
+      compressionRatio,
+      estimatedDbSize: compressedSize * 1.3 // ~30% overhead estimate
+    };
   });
 
-  async function login() {
-    if (!String(passphrase || '').trim()) return;
+  // Initialize the filesystem
+  async function init() {
+    if (globalState.auth.value || !String(passphrase || '').trim()) return;
 
     loading.value = true;
     try {
-      keys.value = await cryptoUtils.deriveKeys(passphrase);
+      globalState.keys.value = await cryptoUtils.deriveKeys(passphrase);
 
-      db.value = await openDB(keys.value.dbName, 1, {
+      globalState.db.value = await openDB(globalState.keys.value.dbName, 1, {
         upgrade(database) {
           if (!database.objectStoreNames.contains('files')) database.createObjectStore('files');
           if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta');
@@ -65,23 +60,25 @@ export function useHashFS(passphrase) {
         }
       });
 
-      chainManager.value = createChainManager(db.value, keys.value.encKey);
+      globalState.chainManager.value = createChainManager(
+        globalState.db.value,
+        globalState.keys.value.encKey
+      );
 
       // Load metadata
       try {
-        const encrypted = await db.value.get('meta', 'index');
+        const encrypted = await globalState.db.value.get('meta', 'index');
         if (encrypted) {
-          const decrypted = await cryptoUtils.decrypt(encrypted, keys.value.encKey);
+          const decrypted = await cryptoUtils.decrypt(encrypted, globalState.keys.value.encKey);
           const data = JSON.parse(decoder.decode(decrypted));
-          Object.assign(metadata.files, data.files || {});
-
+          Object.assign(globalState.metadata.files, data.files || {});
         }
       } catch (e) {
         console.warn('Metadata load failed:', e);
       }
 
       await cleanup();
-      auth.value = true;
+      globalState.auth.value = true;
 
     } catch (e) {
       throw new Error('Authentication failed: ' + e.message);
@@ -90,446 +87,91 @@ export function useHashFS(passphrase) {
     }
   }
 
+  async function cleanup() {
+    const referenced = new Set();
+    const ghostFiles = [];
+
+    for (const [fileName, meta] of Object.entries(globalState.metadata.files)) {
+      let hasValidContent = false;
+
+      if (meta.chainId) {
+        try {
+          const chain = await globalState.chainManager.value.getChain(meta.chainId);
+          chain.versions.forEach(v => {
+            if (v.key) {
+              referenced.add(v.key);
+              hasValidContent = true;
+            }
+          });
+        } catch (error) {
+          console.warn(`Failed to load chain for ${fileName}:`, error);
+        }
+      }
+
+      if (meta.activeKey) {
+        try {
+          const exists = await globalState.db.value.get('files', meta.activeKey);
+          if (exists) {
+            referenced.add(meta.activeKey);
+            hasValidContent = true;
+          }
+        } catch (error) {
+          console.warn(`Error checking activeKey for ${fileName}:`, error);
+        }
+      }
+
+      if (!hasValidContent && (meta.activeKey || meta.headVersion > 0)) {
+        ghostFiles.push(fileName);
+      }
+    }
+
+    if (ghostFiles.length > 0) {
+      ghostFiles.forEach(name => delete globalState.metadata.files[name]);
+      await saveMetadata();
+    }
+
+    const allKeys = await globalState.db.value.getAllKeys('files');
+    const orphaned = allKeys.filter(key => !referenced.has(key));
+
+    if (orphaned.length > 0) {
+      const tx = globalState.db.value.transaction(['files'], 'readwrite');
+      for (const key of orphaned) {
+        try { await tx.objectStore('files').delete(key); }
+        catch (e) { console.warn('Cleanup failed for:', key, e); }
+      }
+      await tx.done;
+    }
+  }
 
   async function saveMetadata() {
-    const data = { files: metadata.files, schemaVersion: 4 };
+    const data = { files: globalState.metadata.files, schemaVersion: 5 };
     const bytes = encoder.encode(JSON.stringify(data));
-    const encrypted = await cryptoUtils.encrypt(bytes, keys.value.encKey);
-    await db.value.put('meta', encrypted, 'index');
+    const encrypted = await cryptoUtils.encrypt(bytes, globalState.keys.value.encKey);
+    await globalState.db.value.put('meta', encrypted, 'index');
   }
 
-  async function cleanup() {
-    try {
-      // Get all referenced keys from all chains and metadata
-      const referenced = new Set();
-      const ghostFiles = [];
-
-      for (const [fileName, meta] of Object.entries(metadata.files)) {
-        let hasValidContent = false;
-
-        if (meta.chainId) {
-          try {
-            const chain = await chainManager.value.getChain(meta.chainId);
-            chain.versions.forEach(v => {
-              if (v.key) {
-                referenced.add(v.key);
-                hasValidContent = true;
-              }
-            });
-          } catch (error) {
-            console.warn(`Failed to load chain for ${fileName}:`, error);
-          }
-        }
-
-        if (meta.activeKey) {
-          // Verify the active key actually exists
-          try {
-            const exists = await db.value.get('files', meta.activeKey);
-            if (exists) {
-              referenced.add(meta.activeKey);
-              hasValidContent = true;
-            } else {
-              console.warn(`Ghost file detected: ${fileName} - activeKey ${meta.activeKey} not found`);
-            }
-          } catch (error) {
-            console.warn(`Error checking activeKey for ${fileName}:`, error);
-          }
-        }
-
-        // If file has no valid content, mark as ghost
-        if (!hasValidContent && (meta.activeKey || meta.headVersion > 0)) {
-          ghostFiles.push(fileName);
-        }
-      }
-
-      // Remove ghost files from metadata
-      if (ghostFiles.length > 0) {
-        console.warn('Removing ghost files:', ghostFiles);
-        ghostFiles.forEach(name => delete metadata.files[name]);
-        await saveMetadata();
-      }
-
-      // Clean orphaned files from database
-      const allKeys = await db.value.getAllKeys('files');
-      const orphaned = allKeys.filter(key => !referenced.has(key));
-
-      if (orphaned.length > 0) {
-        const tx = db.value.transaction(['files'], 'readwrite');
-        const store = tx.objectStore('files');
-
-        for (const key of orphaned) {
-          try {
-            await store.delete(key);
-          } catch (e) {
-            console.warn('Cleanup failed for:', key, e);
-          }
-        }
-
-        await tx.done;
-        console.log(`Cleaned up ${orphaned.length} orphaned files and ${ghostFiles.length} ghost files`);
-      }
-
-    } catch (error) {
-      console.warn('Cleanup failed:', error);
-    }
-  }
-
-  async function selectFile(name) {
-    if (current.dirty) await saveFile();
-
-    Object.assign(current, {
-      name,
-      mime: 'text/markdown',
-      bytes: new Uint8Array(),
-      dirty: false
-    });
-
-    const meta = metadata.files[name];
-    if (!meta) {
-      // New file
-      const chainId = cryptoUtils.generateChainId();
-      metadata.files[name] = {
-        mime: 'text/markdown',
-        chainId,
-        headVersion: 0,
-        lastModified: Date.now(),
-        lastSize: 0,
-        lastCompressedSize: 0,
-        activeKey: null
-      };
-
-      const welcome = `# Welcome to ${name}\n\nStart editing your encrypted file...`;
-      current.bytes = encoder.encode(welcome);
-      current.dirty = true;
-      return;
-    }
-
-    current.mime = meta.mime;
-
-    // Check if file actually has content
-    if (!meta.activeKey || meta.headVersion === 0) {
-      console.warn(`File "${name}" has no content, treating as new file`);
-      return;
-    }
-
-    loading.value = true;
-    try {
-      // Verify file exists in database first
-      const encrypted = await db.value.get('files', meta.activeKey);
-      if (!encrypted) {
-        console.error(`File data not found for "${name}", key: ${meta.activeKey}`);
-
-        // Handle ghost file - remove from metadata
-        delete metadata.files[name];
-        await saveMetadata();
-
-        throw new Error(`File "${name}" is corrupted and has been removed from the file list. Please create a new file with this name if needed.`);
-      }
-
-      const decrypted = await cryptoUtils.decrypt(encrypted, keys.value.encKey);
-      const inflated = await compress.inflate(decrypted);
-
-      // Verify against chain
-      const hash = cryptoUtils.hash(inflated);
-      const chain = await chainManager.value.getChain(meta.chainId);
-      const latest = chain.versions[chain.versions.length - 1];
-
-      if (!latest || hash !== latest.hash || !keys.value.verify(hash, latest.sig)) {
-        console.error(`Integrity verification failed for "${name}"`);
-        throw new Error(`File "${name}" failed integrity verification. The file may be corrupted.`);
-      }
-
-      current.bytes = inflated;
-      current.dirty = false;
-
-    } catch (e) {
-      console.error('Load error:', e);
-      alert(e.message);
-
-      // If it's a ghost file, clean up
-      if (e.message.includes('File data not found') || e.message.includes('corrupted')) {
-        Object.assign(current, {
-          name: '',
-          mime: 'text/markdown',
-          bytes: new Uint8Array(),
-          dirty: false
-        });
-      }
-    } finally {
-      loading.value = false;
-    }
-  }
-
-  async function saveFile() {
-    if (!current.name || !current.dirty) return;
-
-    const { name, mime, bytes } = current;
-    const hash = cryptoUtils.hash(bytes);
-
-    // Ensure file metadata exists
-    if (!metadata.files[name]) {
-      const chainId = cryptoUtils.generateChainId();
-      metadata.files[name] = {
-        mime,
-        chainId,
-        headVersion: 0,
-        lastModified: Date.now(),
-        lastSize: bytes.length,
-        lastCompressedSize: 0,
-        activeKey: null
-      };
-    }
-
-    const meta = metadata.files[name];
-
-    // Check if content is unchanged
-    try {
-      const chain = await chainManager.value.getChain(meta.chainId);
-      const latest = chain.versions[chain.versions.length - 1];
-
-      if (latest?.hash === hash) {
-        if (meta.mime !== mime) {
-          meta.mime = mime;
-          await saveMetadata();
-        }
-        current.dirty = false;
-        return;
-      }
-    } catch (error) {
-      console.warn('Chain verification failed, continuing with save:', error);
-    }
-
-    // Prepare new version data
-    const sig = keys.value.sign(hash);
-    const key = cryptoUtils.generateKey();
-    const version = meta.headVersion + 1;
-
-    let compressed, encrypted, metaEncrypted;
-
-    try {
-      compressed = await compress.deflate(bytes);
-      encrypted = await cryptoUtils.encrypt(compressed, keys.value.encKey);
-
-      // Prepare updated metadata
-      const updatedMetadata = {
-        ...metadata.files,
-        [name]: {
-          ...meta,
-          mime,
-          headVersion: version,
-          lastModified: Date.now(),
-          lastSize: bytes.length,
-          lastCompressedSize: compressed.length,
-          activeKey: key
-        }
-      };
-
-      const metaBytes = encoder.encode(JSON.stringify({
-        files: updatedMetadata,
-        schemaVersion: 4
-      }));
-      metaEncrypted = await cryptoUtils.encrypt(metaBytes, keys.value.encKey);
-    } catch (error) {
-      console.error('Failed to prepare save data:', error);
-      throw error;
-    }
-
-    // Atomic transaction
-    const tx = db.value.transaction(['files', 'meta'], 'readwrite');
-    const filesStore = tx.objectStore('files');
-    const metaStore = tx.objectStore('meta');
-
-    try {
-      await filesStore.put(encrypted, key);
-      await metaStore.put(metaEncrypted, 'index');
-      await tx.done;
-
-      // Update in-memory metadata only after successful transaction
-      meta.mime = mime;
-      meta.headVersion = version;
-      meta.lastModified = Date.now();
-      meta.lastSize = bytes.length;
-      meta.lastCompressedSize = compressed.length;
-      meta.activeKey = key;
-
-      // Update chain after successful storage
+  async function importAll(fileList) {
+    const results = [];
+    for (const file of fileList) {
       try {
-        await chainManager.value.addVersion(meta.chainId, {
-          version,
-          hash,
-          sig,
-          key,
-          size: bytes.length,
-          ts: Date.now()
-        });
-      } catch (chainError) {
-        console.error('Chain update failed:', chainError);
-        // Don't throw - file is saved, chain can be rebuilt
+        const fileInstance = createFileInstance(file.name, null, undefined, fileInstances)
+        await fileInstance.import(file);
+        results.push({ name: file.name, success: true });
+      } catch (error) {
+        console.error(`Import failed for ${file.name}:`, error);
+        results.push({ name: file.name, success: false, error: error.message });
       }
-
-      current.dirty = false;
-
-    } catch (error) {
-      console.error('Save failed:', error);
-      try {
-        tx.abort();
-      } catch (abortError) {
-        console.warn('Failed to abort transaction:', abortError);
-      }
-      throw error;
     }
-  }
-
-  function newFile(name) {
-    name = name?.trim() || prompt('File name:')?.trim();
-    if (!name || metadata.files[name]) {
-      if (metadata.files[name]) alert('File already exists');
-      return false;
-    }
-    selectFile(name);
-    return true;
-  }
-
-  async function deleteFile(name) {
-    if (!confirm(`Delete "${name}"?`)) return;
-
-    const meta = metadata.files[name];
-    if (!meta) return; // Already deleted
-
-    // Collect all keys to delete BEFORE starting transaction
-    const keysToDelete = [];
-    let chainId = null;
-
-    try {
-      if (meta.chainId) {
-        chainId = meta.chainId;
-        const chain = await chainManager.value.getChain(meta.chainId);
-        keysToDelete.push(...chain.versions.map(v => v.key).filter(Boolean));
-      }
-      if (meta.activeKey) {
-        keysToDelete.push(meta.activeKey);
-      }
-    } catch (error) {
-      console.warn('Failed to collect keys for deletion:', error);
-      // Continue with deletion anyway to clean up metadata
-    }
-
-    // Prepare new metadata WITHOUT the deleted file
-    const newMetadata = { ...metadata.files };
-    delete newMetadata[name];
-
-    const metaBytes = encoder.encode(JSON.stringify({
-      files: newMetadata,
-      schemaVersion: 4
-    }));
-
-    let metaEncrypted;
-    try {
-      metaEncrypted = await cryptoUtils.encrypt(metaBytes, keys.value.encKey);
-    } catch (error) {
-      console.error('Failed to encrypt metadata:', error);
-      return;
-    }
-
-    // Start atomic transaction
-    const tx = db.value.transaction(['files', 'meta', 'chains'], 'readwrite');
-    const filesStore = tx.objectStore('files');
-    const metaStore = tx.objectStore('meta');
-    const chainsStore = tx.objectStore('chains');
-
-    try {
-      // Delete all file content keys
-      for (const key of keysToDelete) {
-        try {
-          await filesStore.delete(key);
-        } catch (e) {
-          console.warn('Failed to delete file content:', key, e);
-          // Continue with other deletions
-        }
-      }
-
-      // Delete chain if it exists
-      if (chainId) {
-        try {
-          await chainsStore.delete(chainId);
-        } catch (e) {
-          console.warn('Failed to delete chain:', chainId, e);
-        }
-      }
-
-      // Update metadata last
-      await metaStore.put(metaEncrypted, 'index');
-
-      // Wait for transaction to complete
-      await tx.done;
-
-      // Only update in-memory metadata AFTER successful transaction
-      delete metadata.files[name];
-
-      // Clear current file if it was the deleted one
-      if (current.name === name) {
-        Object.assign(current, {
-          name: '',
-          mime: 'text/markdown',
-          bytes: new Uint8Array(),
-          dirty: false
-        });
-      }
-
-      console.log(`Successfully deleted file: ${name}`);
-
-    } catch (error) {
-      console.error('Delete transaction failed:', error);
-      try {
-        tx.abort();
-      } catch (abortError) {
-        console.warn('Failed to abort transaction:', abortError);
-      }
-
-      // Don't update metadata on failure - keep it consistent
-      alert(`Failed to delete file "${name}": ${error.message}`);
-      throw error;
-    }
-  }
-
-
-  async function importFile(file) {
-    if (!file) return false;
-    Object.assign(current, {
-      name: file.name,
-      mime: file.type || 'application/octet-stream',
-      bytes: new Uint8Array(await file.arrayBuffer()),
-      dirty: true
-    });
-    return true;
-  }
-
-  function exportFile() {
-    if (!current.name) return;
-    const blob = new Blob([current.bytes], { type: current.mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = current.name;
-    a.click();
-  }
-
-  async function renameFile(oldName, newName) {
-    if (!metadata.files[oldName] || metadata.files[newName]) return false;
-    metadata.files[newName] = metadata.files[oldName];
-    delete metadata.files[oldName];
-    await saveMetadata();
-    if (current.name === oldName) current.name = newName;
-    return true;
+    return results;
   }
 
   async function exportAll() {
     const exported = {};
-    for (const [name, meta] of Object.entries(metadata.files)) {
+    for (const [name, meta] of Object.entries(globalState.metadata.files)) {
       if (meta.activeKey) {
         try {
-          const encrypted = await db.value.get('files', meta.activeKey);
-          const decrypted = await cryptoUtils.decrypt(encrypted, keys.value.encKey);
+          const encrypted = await globalState.db.value.get('files', meta.activeKey);
+          const decrypted = await cryptoUtils.decrypt(encrypted, globalState.keys.value.encKey);
           const content = await compress.inflate(decrypted);
           exported[name] = {
             mime: meta.mime,
@@ -543,22 +185,309 @@ export function useHashFS(passphrase) {
     return exported;
   }
 
-  onBeforeUnmount(() => clearTimeout(saveTimer));
+  // Initialize on first call
+  init();
 
   return {
-    // State
-    auth, loading, files: filesList,
-    currentFile: computed(() => current.name),
-    currentMime: computed({
-      get: () => current.mime,
-      set: (mime) => { current.mime = mime; current.dirty = true; }
-    }),
-    contentText,
-    contentBytes: computed(() => current.bytes),
-    isDirty: computed(() => current.dirty),
-
-    // Operations
-    login, saveFile, selectFile, newFile, deleteFile, renameFile,
-    importFile, exportFile, exportAll
+    auth: globalState.auth,
+    files,
+    stats,
+    importAll,
+    exportAll,
+    useFile: (filename, initialContent, fileOptions) =>
+      createFileInstance(filename, initialContent, fileOptions, fileInstances)
   };
+}
+
+// File instance factory
+function createFileInstance(filename, initialContent = '', fileOptions = {}) {
+  if (!filename) throw new Error('Filename is required');
+
+  const loading = ref(false);
+  const bytes = ref(new Uint8Array());
+  const mime = ref('text/plain');
+  const dirty = ref(false);
+
+  let saveTimer = null;
+  const scheduleAutoSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => save(), fileOptions.autoSaveDelay || 800);
+  };
+
+  // Reactive text content (for text files under 5MB)
+  const text = computed({
+    get: () => {
+      if (bytes.value.length > 5 * 1024 * 1024) return ''; // 5MB limit
+      try { return decoder.decode(bytes.value); }
+      catch { return ''; }
+    },
+    set: (value) => {
+      bytes.value = encoder.encode(value || '');
+      dirty.value = true;
+      if (fileOptions.autoSave !== false) scheduleAutoSave();
+    }
+  });
+
+  async function load() {
+    if (!globalState.auth.value) throw new Error('Not authenticated');
+
+    const meta = globalState.metadata.files[filename];
+    if (!meta) {
+      // New file
+      if (initialContent) {
+        if (typeof initialContent === 'string') {
+          bytes.value = encoder.encode(initialContent);
+          mime.value = 'text/plain';
+        } else if (initialContent instanceof Uint8Array) {
+          bytes.value = initialContent;
+          mime.value = fileOptions.mime || 'application/octet-stream';
+        }
+        dirty.value = true;
+      }
+      return;
+    }
+
+    if (!meta.activeKey || meta.headVersion === 0) return;
+
+    loading.value = true;
+    try {
+      const encrypted = await globalState.db.value.get('files', meta.activeKey);
+      if (!encrypted) {
+        delete globalState.metadata.files[filename];
+        await saveMetadata();
+        throw new Error(`File "${filename}" is corrupted and has been removed.`);
+      }
+
+      const decrypted = await cryptoUtils.decrypt(encrypted, globalState.keys.value.encKey);
+      const inflated = await compress.inflate(decrypted);
+
+      // Verify integrity
+      const hash = cryptoUtils.hash(inflated);
+      const chain = await globalState.chainManager.value.getChain(meta.chainId);
+      const latest = chain.versions[chain.versions.length - 1];
+
+      if (!latest || hash !== latest.hash || !globalState.keys.value.verify(hash, latest.sig)) {
+        throw new Error(`File "${filename}" failed integrity verification.`);
+      }
+
+      bytes.value = inflated;
+      mime.value = meta.mime || 'application/octet-stream';
+      dirty.value = false;
+
+    } catch (e) {
+      console.error('Load error:', e);
+      throw e;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function save() {
+    if (!dirty.value || !globalState.auth.value) return;
+
+    const hash = cryptoUtils.hash(bytes.value);
+
+    // Ensure metadata exists
+    if (!globalState.metadata.files[filename]) {
+      const chainId = cryptoUtils.generateChainId();
+      globalState.metadata.files[filename] = {
+        mime: mime.value,
+        chainId,
+        headVersion: 0,
+        lastModified: Date.now(),
+        lastSize: bytes.value.length,
+        lastCompressedSize: 0,
+        activeKey: null
+      };
+    }
+
+    const meta = globalState.metadata.files[filename];
+
+    // Check if content unchanged
+    try {
+      const chain = await globalState.chainManager.value.getChain(meta.chainId);
+      const latest = chain.versions[chain.versions.length - 1];
+      if (latest?.hash === hash) {
+        if (meta.mime !== mime.value) {
+          meta.mime = mime.value;
+          await saveMetadata();
+        }
+        dirty.value = false;
+        return;
+      }
+    } catch (error) {
+      console.warn('Chain verification failed, continuing with save:', error);
+    }
+
+    const sig = globalState.keys.value.sign(hash);
+    const key = cryptoUtils.generateKey();
+    const version = meta.headVersion + 1;
+
+    let compressed, encrypted;
+    try {
+      compressed = await compress.deflate(bytes.value);
+      encrypted = await cryptoUtils.encrypt(compressed, globalState.keys.value.encKey);
+    } catch (error) {
+      console.error('Failed to compress/encrypt data:', error);
+      throw new Error(`Failed to prepare file data: ${error.message}`);
+    }
+
+    // Atomic save
+    const tx = globalState.db.value.transaction(['files', 'meta'], 'readwrite');
+    try {
+      await tx.objectStore('files').put(encrypted, key);
+
+      // Update metadata
+      meta.mime = mime.value;
+      meta.headVersion = version;
+      meta.lastModified = Date.now();
+      meta.lastSize = bytes.value.length;
+      meta.lastCompressedSize = compressed.length;
+      meta.activeKey = key;
+
+      const metaBytes = encoder.encode(JSON.stringify({
+        files: globalState.metadata.files,
+        schemaVersion: 5
+      }));
+      const metaEncrypted = await cryptoUtils.encrypt(metaBytes, globalState.keys.value.encKey);
+      await tx.objectStore('meta').put(metaEncrypted, 'index');
+
+      await tx.done;
+
+      // Update chain after successful transaction
+      try {
+        await globalState.chainManager.value.addVersion(meta.chainId, {
+          version, hash, sig, key,
+          size: bytes.value.length,
+          ts: Date.now()
+        });
+      } catch (chainError) {
+        console.warn('Chain update failed (file saved successfully):', chainError);
+        // Don't throw - file is saved, chain can be rebuilt
+      }
+
+      dirty.value = false;
+    } catch (error) {
+      console.error('Save transaction failed:', error);
+      try { tx.abort(); } catch { }
+      throw new Error(`Save failed: ${error.message}`);
+    }
+  }
+
+  async function rename(newName) {
+    if (!newName || globalState.metadata.files[newName]) return false;
+    if (!globalState.metadata.files[filename]) return false;
+
+    globalState.metadata.files[newName] = globalState.metadata.files[filename];
+    delete globalState.metadata.files[filename];
+    await saveMetadata();
+
+    // Update internal filename reference
+    Object.defineProperty(instance, 'filename', { value: newName, writable: false });
+    return true;
+  }
+
+  async function deleteFile() {
+    const meta = globalState.metadata.files[filename];
+    if (!meta) return;
+
+    const keysToDelete = [];
+    if (meta.chainId) {
+      try {
+        const chain = await globalState.chainManager.value.getChain(meta.chainId);
+        keysToDelete.push(...chain.versions.map(v => v.key).filter(Boolean));
+      } catch (e) {
+        console.warn('Failed to collect keys for deletion:', e);
+      }
+    }
+    if (meta.activeKey) keysToDelete.push(meta.activeKey);
+
+    const tx = globalState.db.value.transaction(['files', 'meta', 'chains'], 'readwrite');
+    try {
+      for (const key of keysToDelete) {
+        await tx.objectStore('files').delete(key);
+      }
+      if (meta.chainId) {
+        await tx.objectStore('chains').delete(meta.chainId);
+      }
+
+      delete globalState.metadata.files[filename];
+      const metaBytes = encoder.encode(JSON.stringify({
+        files: globalState.metadata.files,
+        schemaVersion: 5
+      }));
+      const metaEncrypted = await cryptoUtils.encrypt(metaBytes, globalState.keys.value.encKey);
+      await tx.objectStore('meta').put(metaEncrypted, 'index');
+
+      await tx.done;
+
+      // Reset instance state
+      bytes.value = new Uint8Array();
+      dirty.value = false;
+    } catch (error) {
+      try { tx.abort(); } catch { }
+      throw error;
+    }
+  }
+
+  async function importFile(file) {
+    if (!globalState.auth.value) throw new Error('Not authenticated');
+
+    mime.value = file.type || 'application/octet-stream';
+    bytes.value = new Uint8Array(await file.arrayBuffer());
+    dirty.value = true;
+
+    // Auto-save imported files
+    try {
+      await save();
+    } catch (error) {
+      console.error('Auto-save after import failed:', error);
+      throw new Error(`Import successful but save failed: ${error.message}`);
+    }
+  }
+
+  function exportFile() {
+    const blob = new Blob([bytes.value], { type: mime.value });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    // URL.revokeObjectURL(url);
+  }
+
+  const instance = {
+    loading,
+    filename,
+    mime,
+    text,
+    bytes,
+    dirty,
+    load,
+    save,
+    rename,
+    delete: deleteFile,
+    import: importFile,
+    export: exportFile
+  };
+
+  // Auto-load on creation
+  load().catch(console.warn);
+
+  // Cleanup timer on instance destruction
+  const cleanup = () => clearTimeout(saveTimer);
+  if (typeof onBeforeUnmount === 'function') {
+    onBeforeUnmount(cleanup);
+  }
+
+  return instance;
+}
+
+// Helper to save metadata (used internally)
+async function saveMetadata() {
+  if (!globalState.auth.value) return;
+  const data = { files: globalState.metadata.files, schemaVersion: 5 };
+  const bytes = encoder.encode(JSON.stringify(data));
+  const encrypted = await cryptoUtils.encrypt(bytes, globalState.keys.value.encKey);
+  await globalState.db.value.put('meta', encrypted, 'index');
 }

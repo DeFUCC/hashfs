@@ -1,6 +1,7 @@
 <script setup vapor>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import HashFS from './main/HashFS.vue';
+import { version } from './package.json'
 
 const inp = ref('')
 const passphrase = ref(null)
@@ -32,6 +33,7 @@ watch(passphrase, (val) => {
     .text-lg Enter a passphrase  to enter your vault
     input.bg-light-100.p-4.rounded-lg.text-center(v-model="inp" type="password")
     button.text-xl.p-4.shadow-lg.rounded-lg.bg-green-400(type="submit") Enter
+    a.text-xs.op-40(href="https://www.npmjs.com/package/hashfs" target="_blank") v.{{ version }}
   template(v-else)
     button.p-4.rounded-lg.absolute.top-4.right-4(@click="passphrase = null; inp = null")
       .i-lucide-x

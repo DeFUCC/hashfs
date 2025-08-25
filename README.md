@@ -1,6 +1,6 @@
 # HashFS 🔐
 
-**Encrypted browser storage**
+## Encrypted browser storage
 
 HashFS is a production-ready Vue 3 composable that provides military-grade encrypted file storage directly in your browser. It combines content-addressable storage, Ed25519 signatures, and cryptographic hash chains to create a zero-trust file vault with complete privacy - no servers, no tracking, no data leaks.
 
@@ -52,195 +52,142 @@ Content → SHA-256 → Ed25519 Sign → Chain Link → Deflate → AES-GCM → 
 npm install hashfs
 ```
 
-### Complete Example
+---
+
+## 🧩 Usage with `useHashFS()` and `useFile()`
+
+The new API introduces a **dual-composable design**:
+
+- `useHashFS(passphrase)` - Manages the secure vault and global file index
+- `useFile(vault, name, mime)` - Binds to a specific file for easy reactive read/write
+
+This allows you to directly work with a file as a reactive resource, while still retaining access to full vault management.
+
+---
+
+### Example 1: Upload and read back a **text file**
 
 ```vue
-<template>
-	<div v-if="!auth" class="login">
-		<input
-			v-model="passphrase"
-			type="password"
-			placeholder="Enter passphrase"
-		/>
-		<button @click="login()" :disabled="loading">Unlock Vault</button>
-	</div>
-
-	<div v-else class="vault">
-		<!-- File Browser -->
-		<div class="sidebar">
-			<h3>Files ({{ files.length }})</h3>
-			<div
-				v-for="file in files"
-				:key="file.name"
-				:class="{ active: file.active }"
-				class="file-item"
-			>
-				<span @click="selectFile(file.name)">{{ file.name }}</span>
-				<small>{{ formatSize(file.size) }} • v{{ file.versions }}</small>
-				<button @click="deleteFile(file.name)">×</button>
-			</div>
-
-			<button @click="newFile()">+ New File</button>
-			<input type="file" @change="importFile($event.target.files[0])" />
-		</div>
-
-		<!-- Editor -->
-		<div class="editor">
-			<div v-if="currentFile" class="editor-header">
-				<h2>{{ currentFile }}</h2>
-				<span v-if="isDirty" class="dirty">●</span>
-				<button @click="exportFile()">Export</button>
-				<select v-model="currentMime">
-					<option value="text/markdown">Markdown</option>
-					<option value="text/plain">Text</option>
-					<option value="application/json">JSON</option>
-				</select>
-			</div>
-
-			<textarea
-				v-if="currentFile"
-				v-model="contentText"
-				placeholder="Start typing..."
-				class="content"
-			></textarea>
-
-			<div v-else class="welcome">
-				<h3>Secure Encrypted Vault</h3>
-				<p>Create a new file or select an existing one to begin.</p>
-			</div>
-		</div>
-	</div>
-</template>
-
 <script setup>
 	import { ref } from "vue";
 	import { useHashFS } from "hashfs";
 
-	const passphrase = ref("");
+	const passphrase = ref("correct horse battery staple");
 
-	const {
-		// State
-		auth,
-		loading,
-		files,
-		currentFile,
-		currentMime,
-		contentText,
-		isDirty,
+	// Unlock the vault
+	const vault = useHashFS(passphrase.value);
 
-		// Core operations
-		login: loginCore,
-		saveFile,
-		selectFile,
-		newFile,
-		deleteFile,
-		importFile,
-		exportFile,
-		exportAll,
-	} = useHashFS();
+	// Create or open a text file
+	const notes = vault.useFile(vault, "notes.txt", "text/plain");
 
-	const login = async () => {
-		if (!passphrase.value.trim()) return;
-		const vault = useHashFS(passphrase.value);
-		await vault.login();
+	// Reactive text content
+	notes.text.value = "Hello, secure world!";
+
+	// Persist change
+	await notes.save();
+
+	// Later, read it back
+	console.log(notes.text.value); // "Hello, secure world!"
+</script>
+```
+
+---
+
+### Example 2: Upload and read back a **binary file (image)**
+
+```vue
+<script setup>
+	import { ref } from "vue";
+	import { useHashFS } from "hashfs";
+
+	const passphrase = ref("my-photo-vault");
+
+	// Unlock vault
+	const vault = useHashFS(passphrase.value);
+
+	// Work with an image file
+	const avatar = vault.useFile("avatar.png");
+
+	// Import from an `<input type="file">`
+	const handleFile = async (event) => {
+		const file = event.target.files[0];
+		await avatar.import(file); // Encrypted & stored
 	};
 
-	const formatSize = (bytes) => {
-		const units = ["B", "KB", "MB", "GB"];
-		let size = bytes,
-			unit = 0;
-		while (size >= 1024 && unit < units.length - 1) {
-			size /= 1024;
-			unit++;
-		}
-		return `${Math.round(size * 10) / 10}${units[unit]}`;
+	// Export and display as object URL
+	const showImage = async () => {
+		const blob = await avatar.export();
+		const url = URL.createObjectURL(blob);
+		document.querySelector("#preview").src = url;
 	};
 </script>
 
-<style>
-	.vault {
-		display: flex;
-		height: 100vh;
-	}
-	.sidebar {
-		width: 300px;
-		padding: 1rem;
-		border-right: 1px solid #ddd;
-	}
-	.editor {
-		flex: 1;
-		padding: 1rem;
-	}
-	.file-item {
-		padding: 0.5rem;
-		cursor: pointer;
-	}
-	.file-item.active {
-		background: #e3f2fd;
-	}
-	.content {
-		width: 100%;
-		height: 80vh;
-		resize: vertical;
-	}
-	.dirty {
-		color: #ff9800;
-	}
-</style>
+<template>
+	<input type="file" accept="image/*" @change="handleFile" />
+	<button @click="showImage">Show Stored Image</button>
+	<img id="preview" />
+</template>
 ```
 
-## 📚 Complete API
+---
 
-### State Properties
+## 📚 API Overview
 
-```javascript
-const {
-	auth, // Ref<boolean> - Vault unlocked status
-	loading, // Ref<boolean> - Operation in progress
-	files, // ComputedRef<FileInfo[]> - All files with metadata
-	currentFile, // ComputedRef<string> - Active file name
-	currentMime, // ComputedRef<string> - Active file MIME type
-	contentText, // ComputedRef<string> - Text content (reactive)
-	contentBytes, // ComputedRef<Uint8Array> - Binary content
-	isDirty, // ComputedRef<boolean> - Has unsaved changes
-} = useHashFS(passphrase);
+### `useHashFS(passphrase)`
+
+```js
+const vault = useHashFS(passphrase);
+
+// State
+vault.auth; // Ref<boolean> - Vault unlocked status
+vault.loading; // Ref<boolean> - Operation in progress
+vault.files; // ComputedRef<FileInfo[]> - File index
+
+// Operations
+await vault.exportAll(); // Export entire vault
+await vault.importFile(); // Import a file object
+await vault.deleteFile(); // Delete a file
+
+vault.useFile(); // The reactive file reference
 ```
 
-### Core Operations
+---
 
-```javascript
-// Authentication
-await login(); // Unlock vault with passphrase
-// Throws on wrong passphrase
+### `useFile(name, defaultContent)`
 
-// File Management
-await selectFile("readme.md"); // Load file for editing
-const created = newFile("new.txt"); // Create file (returns boolean)
-await deleteFile("old.txt"); // Permanently delete
-await renameFile("old", "new"); // Rename preserving history
+```js
+const file = useFile("document.md", "# Hello");
 
-// Content Operations
-contentText.value = "New content"; // Auto-saves after 800ms
-await saveFile(); // Manual save with versioning
+// Reactive bindings
+file.text; // Ref<string> - Auto-decoded text content
+file.bytes; // Ref<Uint8Array> - Raw binary content
+file.mime; // Ref<string> - MIME type
+file.isDirty; // Computed<boolean> - Unsaved changes
+file.versions; // Ref<number> - Number of versions
 
-// Import/Export
-await importFile(fileObject); // Import from device
-exportFile(); // Download current file
-const backup = await exportAll(); // Export all as object
+// Methods
+await file.save(); // Save current state
+await file.import(blob); // Import from Blob/File
+await file.export(); // Export as Blob
+await file.rename("new.md");
+await file.delete();
 ```
 
-### File Metadata
+---
 
-```javascript
-// Each file in the files array contains:
+## 📦 File Metadata
+
+Each entry in `vault.files` contains:
+
+```ts
 {
-  name: "document.md",           // File name
-  mime: "text/markdown",         // MIME type
-  versions: 5,                   // Number of versions
-  size: 2048,                   // Uncompressed size
-  compressedSize: 1024,         // Storage size
-  modified: 1703123456789,      // Last modified timestamp
-  active: true                  // Currently selected
+  name: "document.md",     // File name
+  mime: "text/markdown",   // MIME type
+  versions: 3,             // Number of versions
+  size: 2048,              // Original content size
+  compressedSize: 1024,    // Storage size
+  modified: 1703123456789, // Last modified timestamp
+  active: true             // Currently selected
 }
 ```
 
@@ -347,7 +294,7 @@ Browser Environment
 ```
 @noble/curves   (Ed25519 signatures)
 @noble/hashes   (SHA-256, PBKDF2)
-WebCrypto API   (AES-256-GCM)
+@noble/ciphers   (AES-256-GCM)
 fflate          (Deflate compression)
 ```
 
@@ -371,6 +318,8 @@ pnpm run dev
 pnpm run lib
 pnpm run build
 ```
+
+---
 
 ## 📄 License
 

@@ -15,14 +15,14 @@ export const cryptoUtils = {
     const pwdBytes = encoder.encode(String(pwd || '').normalize('NFC').trim());
     if (pwdBytes.length < 8) throw new Error('Password too short');
 
-    const salt = encoder.encode('hashfs-v4-2025');
+    const salt = encoder.encode('hashfs-v5-2025');
     const masterKey = pbkdf2(sha256, pwdBytes, salt, { c: 120000, dkLen: 64 });
 
     const sigKey = masterKey.slice(0, 32);
-    const encKey = masterKey.slice(32, 64); // 32-byte key
+    const encKey = masterKey.slice(32, 64);
     const pubKey = ed25519.getPublicKey(sigKey);
 
-    const dbName = bytesToHex(sha256(pubKey).slice(0, 16)) + '-hashfs-v4';
+    const dbName = bytesToHex(sha256(pubKey).slice(0, 16)) + '-hashfs-v5';
 
     return {
       sigKey, pubKey, encKey, dbName,
@@ -47,8 +47,7 @@ export const cryptoUtils = {
 
   async decrypt(payload, keyBytes) {
     const aes = gcm(keyBytes, payload.iv);
-    const plaintext = aes.decrypt(payload.data);
-    return new Uint8Array(plaintext);
+    return new Uint8Array(aes.decrypt(payload.data));
   }
 };
 
@@ -60,20 +59,18 @@ export const compress = {
     inflate(bytes, (err, result) => err ? reject(err) : resolve(result)))
 };
 
-// Chain management with LRU cache
-export function createChainManager(db, encKey, maxCache = 10) {
+// Chain management with improved caching
+export function createChainManager(db, encKey, maxCache = 20) {
   const cache = new Map();
 
   async function getChain(chainId) {
-    // Check cache first
     if (cache.has(chainId)) {
       const cached = cache.get(chainId);
       cache.delete(chainId);
-      cache.set(chainId, cached); // Move to end (LRU)
+      cache.set(chainId, cached);
       return cached;
     }
 
-    // Load from database
     try {
       const encrypted = await db.get('chains', chainId);
       if (!encrypted) return { versions: [], pruned: { count: 0, oldestKept: 0 } };
@@ -81,7 +78,6 @@ export function createChainManager(db, encKey, maxCache = 10) {
       const decrypted = await cryptoUtils.decrypt(encrypted, encKey);
       const chain = JSON.parse(decoder.decode(decrypted));
 
-      // Cache with LRU eviction
       if (cache.size >= maxCache) {
         const oldest = cache.keys().next().value;
         cache.delete(oldest);
@@ -100,7 +96,6 @@ export function createChainManager(db, encKey, maxCache = 10) {
     const encrypted = await cryptoUtils.encrypt(bytes, encKey);
     await db.put('chains', encrypted, chainId);
 
-    // Update cache
     if (cache.size >= maxCache) {
       const oldest = cache.keys().next().value;
       cache.delete(oldest);
@@ -112,7 +107,6 @@ export function createChainManager(db, encKey, maxCache = 10) {
     const chain = await getChain(chainId);
     chain.versions.push(version);
 
-    // Prune if needed (keep last 15 versions)
     const toDelete = [];
     while (chain.versions.length > 15) {
       const old = chain.versions.shift();
@@ -126,17 +120,11 @@ export function createChainManager(db, encKey, maxCache = 10) {
 
     await saveChain(chainId, chain);
 
-    // Clean up orphaned content
     if (toDelete.length > 0) {
       const tx = db.transaction(['files'], 'readwrite');
-      const store = tx.objectStore('files');
-
       for (const key of toDelete) {
-        try {
-          await store.delete(key);
-        } catch (e) {
-          console.warn('Failed to delete orphaned content:', key);
-        }
+        try { await tx.objectStore('files').delete(key); }
+        catch (e) { console.warn('Failed to delete orphaned content:', key); }
       }
       await tx.done;
     }
@@ -144,12 +132,5 @@ export function createChainManager(db, encKey, maxCache = 10) {
     return chain;
   }
 
-  async function verifyChain(chainId, keys) {
-    const chain = await getChain(chainId);
-    return chain.versions.every(version =>
-      keys.verify(version.hash, version.sig)
-    );
-  }
-
-  return { getChain, saveChain, addVersion, verifyChain };
+  return { getChain, saveChain, addVersion };
 }

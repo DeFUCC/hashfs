@@ -40,7 +40,7 @@ export default defineConfig({
 			],
 			theme: {
 				breakpoints: {
-					'xs': '320px',
+					'xs': '360px',
 				}
 			}
 		}),
