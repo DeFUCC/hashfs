@@ -1,344 +1,475 @@
-// useHashFS.js - Main thread composable for encrypted file storage
-import { ref, computed, reactive, onBeforeUnmount } from 'vue';
-import StorageWorker from './storage-worker.js?worker&inline'
+// Vue 3 Composable - HashFS with Web Workers
+import { ref, computed, reactive, onBeforeUnmount, nextTick } from 'vue';
+import HashFSWorker from './hashfs-worker.js?worker&inline'
+import BulkWorker from './bulk-worker.js?worker&inline'
+
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export function useHashFS() {
-  // State
-  const auth = ref(false);
-  const loading = ref(false);
-  const files = reactive([]);
+// Global worker instances
+let hashfsWorker = null;
+let bulkWorker = null;
 
-  // Worker management
-  let worker = null;
-  let messageId = 0;
-  const pendingMessages = new Map();
-  const fileBuffers = new Map(); // filename -> SharedArrayBuffer info
+// Request ID counter
+let requestId = 0;
 
-  // Initialize worker
-  function initWorker() {
-    if (worker) return;
+// Pending requests
+const pendingRequests = new Map();
 
-    worker = new StorageWorker()
-
-    worker.onmessage = (e) => {
-      const { id, success, error, sab, ...data } = e.data;
-      const resolve = pendingMessages.get(id);
-      if (resolve) {
-        pendingMessages.delete(id);
-        if (success) resolve({ success: true, ...data });
-        else resolve({ success: false, error });
-      }
-    };
-
-    worker.onerror = (error) => {
-      console.error('Worker error:', error);
-      pendingMessages.forEach(resolve =>
-        resolve({ success: false, error: 'Worker error' })
-      );
-      pendingMessages.clear();
-    };
+class WorkerManager {
+  constructor() {
+    this.initWorkers();
   }
 
-  // Send message to worker
-  function sendMessage(type, data = {}) {
-    return new Promise((resolve) => {
-      initWorker();
-      const id = ++messageId;
-      pendingMessages.set(id, resolve);
-      worker.postMessage({ id, type, data });
+  initWorkers() {
+    if (!hashfsWorker) {
+      hashfsWorker = new HashFSWorker();
+      hashfsWorker.onmessage = this.handleHashfsMessage.bind(this);
+      hashfsWorker.onerror = this.handleWorkerError.bind(this);
+    }
+
+    if (!bulkWorker) {
+      bulkWorker = new BulkWorker();
+      bulkWorker.onmessage = this.handleBulkMessage.bind(this);
+      bulkWorker.onerror = this.handleWorkerError.bind(this);
+    }
+  }
+
+  handleHashfsMessage(e) {
+    const { id, success, result, error } = e.data;
+    const request = pendingRequests.get(id);
+
+    if (request) {
+      pendingRequests.delete(id);
+
+      if (success) {
+        request.resolve(result);
+      } else {
+        request.reject(new Error(error));
+      }
+    }
+  }
+
+  handleBulkMessage(e) {
+    const { id, success, result, error, type, operationId } = e.data;
+
+    if (type === 'progress') {
+      // Handle progress updates
+      const progressHandlers = globalState.progressHandlers.get(operationId);
+      if (progressHandlers) {
+        progressHandlers.forEach(handler => handler(e.data));
+      }
+      return;
+    }
+
+    const request = pendingRequests.get(id);
+    if (request) {
+      pendingRequests.delete(id);
+
+      if (success) {
+        request.resolve(result);
+      } else {
+        request.reject(new Error(error));
+      }
+    }
+  }
+
+  handleWorkerError(e) {
+    console.error('Worker error:', e);
+  }
+
+  async sendToHashfsWorker(type, data = {}) {
+    const id = ++requestId;
+
+    return new Promise((resolve, reject) => {
+      pendingRequests.set(id, { resolve, reject });
+
+      // Determine transferable objects
+      const transferable = [];
+      if (data.bytes instanceof ArrayBuffer) {
+        transferable.push(data.bytes);
+      }
+
+      hashfsWorker.postMessage({ id, type, data }, transferable);
     });
   }
 
-  // Login function
-  async function login(passphrase) {
-    if (!passphrase?.trim()) throw new Error('Passphrase required');
+  async sendToBulkWorker(type, data = {}, operationId = null) {
+    const id = ++requestId;
+
+    return new Promise((resolve, reject) => {
+      pendingRequests.set(id, { resolve, reject });
+
+      const transferable = [];
+      if (data.arrayBuffer instanceof ArrayBuffer) {
+        transferable.push(data.arrayBuffer);
+      }
+
+      bulkWorker.postMessage({ id, type, data, operationId }, transferable);
+    });
+  }
+}
+
+// Global state
+const globalState = {
+  auth: ref(false),
+  files: ref([]),
+  fileBuffers: new Map(),
+  progressHandlers: new Map(),
+  workerManager: new WorkerManager()
+};
+
+export function useHashFS(passphrase, options = {}) {
+  const loading = ref(false);
+  const fileInstances = new Map();
+
+  // Computed stats
+  const stats = computed(() => {
+    const totalSize = globalState.files.value.reduce((sum, f) => sum + f.size, 0);
+    const compressedSize = globalState.files.value.reduce((sum, f) => sum + f.compressedSize, 0);
+    const compressionRatio = totalSize > 0 ? ((totalSize - compressedSize) / totalSize) * 100 : 0;
+
+    return {
+      fileCount: globalState.files.value.length,
+      totalSize,
+      compressedSize,
+      compressionRatio,
+      estimatedDbSize: compressedSize * 1.3
+    };
+  });
+
+  // Initialize
+  async function init() {
+    if (globalState.auth.value || !String(passphrase || '').trim()) return;
 
     loading.value = true;
     try {
-      const result = await sendMessage('login', { passphrase });
+      const result = await globalState.workerManager.sendToHashfsWorker('init', { passphrase });
+
       if (result.success) {
-        auth.value = true;
-        await refreshFilesList();
+        globalState.auth.value = true;
+        globalState.files.value = result.files || [];
       } else {
-        throw new Error(result.error);
+        throw new Error(result.error || 'Authentication failed');
       }
+    } catch (error) {
+      throw new Error('Authentication failed: ' + error.message);
     } finally {
       loading.value = false;
     }
   }
 
-  // Refresh files list
-  async function refreshFilesList() {
-    const result = await sendMessage('getFilesList');
-    if (result.success) {
-      files.splice(0, files.length, ...result.files);
-    }
-  }
+  // Bulk import
+  async function importAll(fileList, onProgress = null) {
+    const operationId = 'import_' + Date.now();
 
-  // Export all files
-  async function exportAll() {
-    const exported = {};
-
-    for (const file of files) {
-      const result = await sendMessage('loadFile', { name: file.name });
-      if (result.success && result.content) {
-        exported[file.name] = {
-          mime: result.mime,
-          content: new Uint8Array(result.content)
-        };
-      }
+    if (onProgress) {
+      globalState.progressHandlers.set(operationId, [onProgress]);
     }
 
-    return exported;
-  }
+    try {
+      // Process files in bulk worker
+      const bulkResults = await globalState.workerManager.sendToBulkWorker(
+        'import',
+        { files: Array.from(fileList) },
+        operationId
+      );
 
-  // File-specific composable
-  function useFile(name) {
-    // File state
-    const fileName = ref(name);
-    const mime = ref('text/plain');
-    const bytes = ref(new Uint8Array());
-    const isDirty = ref(false);
-    const isLoading = ref(false);
+      // Save each file through main worker
+      const saveResults = [];
+      for (const item of bulkResults) {
+        if (item.success) {
+          try {
+            const saveResult = await globalState.workerManager.sendToHashfsWorker(
+              'save',
+              item.data
+            );
 
-    let buffer = null;
-    let saveTimeout = null;
-
-    // Computed text content
-    const text = computed({
-      get: () => {
-        try { return decoder.decode(bytes.value); }
-        catch { return ''; }
-      },
-      set: (value) => {
-        bytes.value = encoder.encode(value || '');
-        isDirty.value = true;
-        scheduleSave();
-      }
-    });
-
-    // Auto-save scheduling
-    function scheduleSave() {
-      clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(save, 800);
-    }
-
-    // Load file content
-    async function load() {
-      if (!auth.value || !fileName.value) return;
-
-      isLoading.value = true;
-      try {
-        // Create shared buffer for large files
-        const maxSize = 10 * 1024 * 1024; // 10MB
-        const bufferId = `file-${fileName.value}-${Date.now()}`;
-
-        const bufferResult = await sendMessage('registerBuffer', {
-          bufferId,
-          size: maxSize
-        });
-
-        if (bufferResult.success && bufferResult.sab) {
-          buffer = {
-            id: bufferId,
-            sab: bufferResult.sab,
-            view: new DataView(bufferResult.sab),
-            bytes: new Uint8Array(bufferResult.sab, 8)
-          };
-        }
-
-        const result = await sendMessage('loadFile', {
-          name: fileName.value,
-          bufferId: buffer?.id
-        });
-
-        if (result.success) {
-          if (result.shared && buffer) {
-            // Read from shared buffer
-            const len = buffer.view.getUint32(0);
-            bytes.value = new Uint8Array(buffer.bytes.slice(0, len));
-          } else if (result.content) {
-            // Direct transfer
-            bytes.value = new Uint8Array(result.content);
+            if (saveResult.success) {
+              saveResults.push({ name: item.name, success: true });
+              // Update file list
+              if (saveResult.files) {
+                globalState.files.value = saveResult.files;
+              }
+            } else {
+              saveResults.push({
+                name: item.name,
+                success: false,
+                error: saveResult.error
+              });
+            }
+          } catch (error) {
+            saveResults.push({
+              name: item.name,
+              success: false,
+              error: error.message
+            });
           }
-
-          mime.value = result.mime || 'text/plain';
-          isDirty.value = false;
-        } else if (result.error === 'File not found') {
-          // New file
-          bytes.value = encoder.encode(`# ${fileName.value}\n\nStart editing...`);
-          mime.value = 'text/markdown';
-          isDirty.value = true;
         } else {
-          throw new Error(result.error);
+          saveResults.push(item);
         }
-      } finally {
-        isLoading.value = false;
+      }
+
+      return saveResults;
+
+    } finally {
+      if (onProgress) {
+        globalState.progressHandlers.delete(operationId);
       }
     }
+  }
 
-    // Save file
-    async function save() {
-      if (!isDirty.value || !fileName.value) return;
+  // Bulk export
+  async function exportAll(onProgress = null) {
+    const operationId = 'export_' + Date.now();
 
-      clearTimeout(saveTimeout);
+    if (onProgress) {
+      globalState.progressHandlers.set(operationId, [onProgress]);
+    }
 
+    try {
+      // Get all file data from main worker
+      const exportData = await globalState.workerManager.sendToHashfsWorker('export-all');
+
+      // Process through bulk worker for efficient handling
+      const processed = await globalState.workerManager.sendToBulkWorker(
+        'export',
+        { fileData: exportData },
+        operationId
+      );
+
+      return processed;
+
+    } finally {
+      if (onProgress) {
+        globalState.progressHandlers.delete(operationId);
+      }
+    }
+  }
+
+  // Initialize on first call
+  init();
+
+  return {
+    auth: globalState.auth,
+    files: globalState.files,
+    stats,
+    loading,
+    importAll,
+    exportAll,
+    useFile: (filename, initialContent, fileOptions) =>
+      createFileInstance(filename, initialContent, fileOptions, fileInstances)
+  };
+}
+
+// File instance factory
+function createFileInstance(filename, initialContent = '', fileOptions = {}) {
+  if (!filename) throw new Error('Filename is required');
+
+  const loading = ref(false);
+  const bytes = ref(new Uint8Array());
+  const mime = ref('text/plain');
+  const dirty = ref(false);
+  const bufferKey = ref(null);
+
+  let saveTimer = null;
+  const scheduleAutoSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => save(), fileOptions.autoSaveDelay || 800);
+  };
+
+  // Reactive text content
+  const text = computed({
+    get: () => {
+      if (bytes.value.length > 5 * 1024 * 1024) return '';
       try {
-        let saveData = {};
-
-        if (buffer && bytes.value.length <= buffer.bytes.length) {
-          // Use shared buffer
-          const len = Math.min(bytes.value.length, buffer.bytes.length);
-          buffer.bytes.set(bytes.value.subarray(0, len));
-          buffer.view.setUint32(0, len);
-          saveData = {
-            name: fileName.value,
-            mime: mime.value,
-            bufferId: buffer.id
-          };
-        } else {
-          // Direct transfer
-          saveData = {
-            name: fileName.value,
-            content: Array.from(bytes.value),
-            mime: mime.value
-          };
-        }
-
-        const result = await sendMessage('saveFile', saveData);
-
-        if (result.success && !result.unchanged) {
-          isDirty.value = false;
-          await refreshFilesList();
-        }
-      } catch (error) {
-        console.error('Save failed:', error);
+        return decoder.decode(bytes.value);
+      } catch {
+        return '';
       }
+    },
+    set: (value) => {
+      const newBytes = encoder.encode(value || '');
+      bytes.value = newBytes;
+      dirty.value = true;
+
+      if (fileOptions.autoSave !== false) scheduleAutoSave();
+    }
+  });
+
+  async function load() {
+    if (!globalState.auth.value) throw new Error('Not authenticated');
+
+    // Handle initial content for new files
+    if (initialContent) {
+      if (typeof initialContent === 'string') {
+        bytes.value = encoder.encode(initialContent);
+        mime.value = fileOptions.mime || 'text/plain';
+      } else if (initialContent instanceof Uint8Array) {
+        bytes.value = initialContent;
+        mime.value = fileOptions.mime || 'application/octet-stream';
+      }
+      dirty.value = true;
+      return;
     }
 
-    // Create new file
-    async function newFile(newName) {
-      const targetName = newName || fileName.value;
-      if (!targetName) throw new Error('File name required');
+    loading.value = true;
+    try {
+      const result = await globalState.workerManager.sendToHashfsWorker('load', { filename });
 
-      fileName.value = targetName;
-      bytes.value = encoder.encode(`# ${targetName}\n\nStart editing...`);
-      mime.value = 'text/markdown';
-      isDirty.value = true;
+      if (result.bytes) {
+        bytes.value = new Uint8Array(result.bytes);
+      }
 
-      return true;
+      mime.value = result.mime || 'application/octet-stream';
+      dirty.value = false;
+
+    } catch (error) {
+      console.error('Load error:', error);
+      throw error;
+    } finally {
+      loading.value = false;
     }
+  }
 
-    // Delete file
-    async function deleteFile() {
-      if (!fileName.value) return false;
+  async function save() {
+    if (!dirty.value || !globalState.auth.value) return;
 
-      const result = await sendMessage('deleteFile', { name: fileName.value });
+    try {
+      const data = {
+        filename,
+        mime: mime.value,
+        bytes: bytes.value.buffer.slice() // Transfer ArrayBuffer
+      };
+
+      const result = await globalState.workerManager.sendToHashfsWorker('save', data);
+
       if (result.success) {
-        await refreshFilesList();
-        // Clear current content
-        fileName.value = '';
-        bytes.value = new Uint8Array();
-        isDirty.value = false;
-        return true;
+        dirty.value = false;
+
+        // Update file list
+        if (result.files) {
+          globalState.files.value = result.files;
+        }
+      } else {
+        throw new Error(result.error || 'Save failed');
       }
-      return false;
+
+    } catch (error) {
+      console.error('Save error:', error);
+      throw error;
     }
+  }
 
-    // Rename file
-    async function rename(newName) {
-      if (!fileName.value || !newName) return false;
+  async function rename(newName) {
+    if (!newName || !globalState.auth.value) return false;
 
-      const result = await sendMessage('renameFile', {
-        oldName: fileName.value,
+    try {
+      const result = await globalState.workerManager.sendToHashfsWorker('rename', {
+        oldName: filename,
         newName
       });
 
       if (result.success) {
-        fileName.value = newName;
-        await refreshFilesList();
+        // Update file list
+        if (result.files) {
+          globalState.files.value = result.files;
+        }
+
+        // Update internal filename reference
+        Object.defineProperty(instance, 'filename', { value: newName, writable: false });
         return true;
       }
+
+      return false;
+    } catch (error) {
+      console.error('Rename error:', error);
       return false;
     }
-
-    // Import file
-    async function importFile(file) {
-      if (!file) return false;
-
-      fileName.value = file.name;
-      mime.value = file.type || 'application/octet-stream';
-      bytes.value = new Uint8Array(await file.arrayBuffer());
-      isDirty.value = true;
-
-      return true;
-    }
-
-    // Export file
-    function exportFile() {
-      if (!fileName.value) return;
-
-      const blob = new Blob([bytes.value], { type: mime.value });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName.value;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-
-    // Load on first access if name provided
-    if (name) {
-      load();
-    }
-
-    // Cleanup
-    onBeforeUnmount(() => {
-      clearTimeout(saveTimeout);
-      if (buffer) {
-        sendMessage('unregisterBuffer', { bufferId: buffer.id });
-      }
-    });
-
-    return {
-      name: fileName,
-      mime,
-      text,
-      bytes: computed(() => bytes.value),
-      isDirty,
-      isLoading,
-      load,
-      save,
-      new: newFile,
-      delete: deleteFile,
-      rename,
-      import: importFile,
-      export: exportFile
-    };
   }
 
-  // Computed files list
-  const filesList = computed(() => files);
+  async function deleteFile() {
+    if (!globalState.auth.value) return;
+
+    try {
+      const result = await globalState.workerManager.sendToHashfsWorker('delete', { filename });
+
+      if (result.success) {
+        // Update file list
+        if (result.files) {
+          globalState.files.value = result.files;
+        }
+
+        // Clear local state
+        bytes.value = new Uint8Array();
+        dirty.value = false;
+      } else {
+        throw new Error(result.error || 'Delete failed');
+      }
+
+    } catch (error) {
+      console.error('Delete error:', error);
+      throw error;
+    }
+  }
+
+  async function importFile(file) {
+    if (!globalState.auth.value) throw new Error('Not authenticated');
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const fileBytes = new Uint8Array(arrayBuffer);
+
+      mime.value = file.type || 'application/octet-stream';
+      bytes.value = fileBytes;
+      dirty.value = true;
+
+      // Auto-save imported files
+      await save();
+
+    } catch (error) {
+      console.error('Import error:', error);
+      throw new Error(`Import failed: ${error.message}`);
+    }
+  }
+
+  function exportFile() {
+    const blob = new Blob([bytes.value], { type: mime.value });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const instance = {
+    loading,
+    filename,
+    mime,
+    text,
+    bytes,
+    dirty,
+    load,
+    save,
+    rename,
+    delete: deleteFile,
+    import: importFile,
+    export: exportFile
+  };
+
+  // Auto-load on creation
+  load().catch(console.warn);
 
   // Cleanup
-  onBeforeUnmount(() => {
-    if (worker) {
-      worker.terminate();
-      worker = null;
-    }
-    fileBuffers.clear();
-    pendingMessages.clear();
-  });
-
-  return {
-    login,
-    auth,
-    loading,
-    filesList,
-    useFile,
-    exportAll
+  const cleanup = () => {
+    clearTimeout(saveTimer);
   };
+
+  if (typeof onBeforeUnmount === 'function') {
+    onBeforeUnmount(cleanup);
+  }
+
+  return instance;
 }

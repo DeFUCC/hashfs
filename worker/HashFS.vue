@@ -1,311 +1,526 @@
-// HashFS.vue - Optimized with UnoCSS and PUG
 <script setup vapor>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { useHashFS } from './useHashFS.js';
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useHashFS } from './useHashFS.js'
+import { version } from '../package.json'
 
 const props = defineProps({
   passphrase: { type: String, required: true }
-});
+})
 
-const storage = useHashFS();
+const {
+  auth, files, stats, loading, importAll, exportAll, useFile
+} = useHashFS(props.passphrase)
 
-// Reactive state
-const showRename = ref(false);
-const renameTarget = ref('');
-const newName = ref('');
-const dragOver = ref(false);
-const fileInput = ref(null);
-const currentFile = ref(null);
+// UI state
+const selectedFile = ref('')
+const showRenameDialog = ref(false)
+const renameTarget = ref('')
+const newName = ref('')
+const dragOver = ref(false)
+const fileInput = ref(null)
+const progressInfo = ref(null)
 
-// Computed
-const hasFiles = computed(() => storage.filesList.value.length > 0);
-const totalSize = computed(() => storage.filesList.value.reduce((sum, f) => sum + (f.size || 0), 0));
+// Current file instance
+const currentFile = computed(() =>
+  selectedFile.value ? useFile(selectedFile.value) : null
+)
+
+// UI helpers
+const hasFiles = computed(() => files.value.length > 0)
+const canEdit = computed(() => {
+  if (!currentFile.value) return false
+  const mime = currentFile.value.mime.value
+  return isTextMime(mime) && currentFile.value.bytes.value.length <= 5 * 1024 * 1024
+})
+const isImage = computed(() => {
+  if (!currentFile.value) return false
+  const mime = currentFile.value.mime.value
+  const name = currentFile.value.filename
+  return /^image\//.test(mime) || /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(name)
+})
+
+// Image blob URL management
+const blobUrl = ref(null)
+watch([() => currentFile.value?.bytes.value, () => currentFile.value?.mime.value, isImage], () => {
+  if (blobUrl.value) {
+    URL.revokeObjectURL(blobUrl.value)
+    blobUrl.value = null
+  }
+  if (isImage.value && currentFile.value?.bytes.value?.length) {
+    try {
+      const blob = new Blob([currentFile.value.bytes.value], {
+        type: currentFile.value.mime.value || 'image/png'
+      })
+      blobUrl.value = URL.createObjectURL(blob)
+    } catch { /* ignore */ }
+  }
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  if (blobUrl.value) URL.revokeObjectURL(blobUrl.value)
+})
+
+// Status indicator
 const statusText = computed(() => {
-  if (storage.loading.value) return '🔄 Working...';
-  if (currentFile.value?.isDirty) return '📝 Unsaved';
-  return '✅ Ready';
-});
+  if (loading.value) return '🔄 Initializing...'
+  if (!currentFile.value) return '✅ Ready'
+  if (currentFile.value.loading.value) return '📄 Working...'
+  if (currentFile.value.dirty.value) return '📝 Unsaved changes'
+  return '✅ Ready'
+})
 
-// File operations
-async function handleLogin() {
-  try {
-    await storage.login(props.passphrase);
-    if (storage.filesList.value.length > 0) {
-      currentFile.value = storage.useFile(storage.filesList.value[0].name);
-    }
-  } catch (error) {
-    alert('Login failed: ' + error.message);
-  }
-}
-
-async function createFile() {
-  const name = prompt('File name:')?.trim();
-  if (name && !storage.filesList.value.find(f => f.name === name)) {
-    currentFile.value = storage.useFile('');
-    await currentFile.value.new(name);
-  }
-}
-
-async function selectFile(name) {
-  if (currentFile.value?.isDirty) await currentFile.value.save();
-  currentFile.value = storage.useFile(name);
-  await currentFile.value.load();
-}
-
-async function importFiles(files) {
-  const file = files?.[0];
-  if (!file) return;
-
-  currentFile.value = storage.useFile('');
-  await currentFile.value.import(file);
-  if (fileInput.value) fileInput.value.value = '';
-}
-
-async function startRename(fileName) {
-  renameTarget.value = fileName;
-  newName.value = fileName;
-  showRename.value = true;
-  await nextTick();
-  document.querySelector('.rename-input')?.select();
-}
-
-async function confirmRename() {
-  if (renameTarget.value && newName.value !== renameTarget.value) {
-    await currentFile.value?.rename(newName.value);
-  }
-  showRename.value = false;
-}
-
-// Drag & drop
-function handleDrop(e) {
-  e.preventDefault();
-  dragOver.value = false;
-  importFiles(e.dataTransfer.files);
-}
-
-// Utilities
+// Utility functions
 function formatSize(bytes) {
-  if (!bytes || bytes < 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function isTextMime(mime) {
+  if (!mime) return true
+  return /^text\//.test(mime) ||
+    /(json|xml|svg|turtle|trig|sparql|sql|csv|yaml|yml|md|markdown|javascript|typescript)/i.test(mime)
 }
 
 function formatDate(ts) {
-  if (!ts) return 'Unknown';
-  const diff = Date.now() - ts;
-  if (diff < 60000) return 'Now';
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
-  return new Date(ts).toLocaleDateString();
+  if (!ts) return 'Unknown'
+  const now = Date.now()
+  const diff = now - ts
+
+  if (diff < 60000) return 'Just now'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
+
+  return new Date(ts).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  })
 }
 
-// Lifecycle
-onMounted(() => {
-  handleLogin();
-  window.addEventListener('keydown', (e) => {
-    if (e.ctrlKey || e.metaKey) {
-      switch (e.key) {
-        case 's': e.preventDefault(); currentFile.value?.save(); break;
-        case 'n': e.preventDefault(); createFile(); break;
-        case 'e': e.preventDefault(); currentFile.value?.export(); break;
+function getCompressionRatio(originalSize, compressedSize) {
+  if (!originalSize || !compressedSize) return 0
+  return ((originalSize - compressedSize) / originalSize) * 100
+}
+
+// Progress handler
+function handleProgress(progress) {
+  progressInfo.value = progress
+}
+
+// File operations
+async function handleImport(fileList) {
+  if (!fileList?.length) return
+
+  try {
+    progressInfo.value = { completed: 0, total: fileList.length, current: '' }
+
+    const results = await importAll(Array.from(fileList), handleProgress)
+    const failed = results.filter(r => !r.success)
+    const succeeded = results.filter(r => r.success)
+
+    if (succeeded.length > 0) {
+      console.log(`Successfully imported: ${succeeded.map(s => s.name).join(', ')}`)
+      if (succeeded.length === 1) {
+        selectedFile.value = succeeded[0].name
       }
     }
-    if (e.key === 'Escape') showRename.value = false;
-  });
-});
+
+    if (failed.length > 0) {
+      const errorDetails = failed.map(f => `${f.name}: ${f.error}`).join('\n')
+      console.error('Import failures:', errorDetails)
+      alert(`Import failed:\n${errorDetails}`)
+    }
+
+    if (fileInput.value) fileInput.value.value = ''
+  } catch (error) {
+    console.error('Import error:', error)
+    alert(`Import failed: ${error.message}`)
+  } finally {
+    progressInfo.value = null
+  }
+}
+
+async function handleNewFile() {
+  const name = prompt('Enter file name:')?.trim()
+  if (!name) return
+
+  if (files.value.find(f => f.name === name)) {
+    alert('File already exists')
+    return
+  }
+
+  selectedFile.value = name
+}
+
+function selectFile(filename) {
+  selectedFile.value = filename
+}
+
+async function startRename(fileName) {
+  renameTarget.value = fileName
+  newName.value = fileName
+  showRenameDialog.value = true
+
+  await nextTick()
+  const input = document.querySelector('.rename-input')
+  input?.select()
+}
+
+async function confirmRename() {
+  if (!renameTarget.value || !newName.value || renameTarget.value === newName.value) {
+    showRenameDialog.value = false
+    return
+  }
+
+  try {
+    const fileInstance = useFile(renameTarget.value)
+    const success = await fileInstance.rename(newName.value)
+
+    if (!success) {
+      alert('Rename failed - file may already exist')
+      return
+    }
+
+    if (selectedFile.value === renameTarget.value) {
+      selectedFile.value = newName.value
+    }
+
+    showRenameDialog.value = false
+  } catch (error) {
+    alert(`Rename failed: ${error.message}`)
+  }
+}
+
+function cancelRename() {
+  showRenameDialog.value = false
+  renameTarget.value = ''
+  newName.value = ''
+}
+
+async function confirmDelete(fileName) {
+  if (!confirm(`Delete "${fileName}" permanently?`)) return
+
+  try {
+    const fileInstance = useFile(fileName)
+    await fileInstance.delete()
+
+    if (selectedFile.value === fileName) {
+      selectedFile.value = ''
+    }
+  } catch (error) {
+    alert(`Delete failed: ${error.message}`)
+  }
+}
+
+async function handleExportAll() {
+  try {
+    progressInfo.value = { completed: 0, total: files.value.length, current: '' }
+
+    const exported = await exportAll(handleProgress)
+
+    // Convert to download format
+    const downloadData = {}
+    for (const [name, data] of Object.entries(exported)) {
+      const bytes = new Uint8Array(data.bytes)
+
+      downloadData[name] = {
+        mime: data.mime,
+        content: Array.from(bytes)
+      }
+    }
+
+    const blob = new Blob([JSON.stringify(downloadData, null, 2)], {
+      type: 'application/json'
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `vault-export-${Date.now()}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    alert(`Export failed: ${error.message}`)
+  } finally {
+    progressInfo.value = null
+  }
+}
+
+// Drag & drop
+function handleDragOver(e) {
+  e.preventDefault()
+  dragOver.value = true
+}
+
+function handleDragLeave() {
+  dragOver.value = false
+}
+
+async function handleDrop(e) {
+  e.preventDefault()
+  dragOver.value = false
+  await handleImport(e.dataTransfer.files)
+}
+
+// Keyboard shortcuts
+function handleKeydown(e) {
+  if (e.ctrlKey || e.metaKey) {
+    switch (e.key) {
+      case 's':
+        e.preventDefault()
+        currentFile.value?.save()
+        break
+      case 'e':
+        e.preventDefault()
+        currentFile.value?.export()
+        break
+      case 'n':
+        e.preventDefault()
+        handleNewFile()
+        break
+    }
+  }
+
+  if (e.key === 'Escape') {
+    showRenameDialog.value = false
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
 </script>
 
 <template lang="pug">
 .hashfs-vault.font-mono.mx-auto.max-w-7xl.px-4.py-6.min-h-screen(
-  v-if="storage"
-  @dragover.prevent="dragOver = true"
-  @dragleave="dragOver = false"  
+  @dragover="handleDragOver"
+  @dragleave="handleDragLeave"
   @drop="handleDrop"
-  :class="dragOver ? 'bg-blue-50 border-2 border-dashed border-blue-400 rounded' : ''"
+  :class="{ 'bg-blue-50 border-2 border-dashed border-blue-400 rounded-lg': dragOver }"
 )
-
   //- Header
-  header.flex.items-center.justify-between.mb-6.pb-4.border-b.border-stone-300
-    .flex.items-center.gap-3
-      h1.text-2xl.font-bold.text-stone-800 🔒 Secure Vault
+  header.flex.items-center.justify-between.mb-6.pb-4.border-b.border-stone-300.gap-2
+    .flex.items-center.gap-3.gap-2
+      h1.m-0.text-2xl.font-bold.text-stone-800.flex.items-center.gap-2 🔒 #FS 
+      a.text-xs.op-40(href="https://www.npmjs.com/package/hashfs" target="_blank") v.{{ version }}
       .text-sm.text-stone-500.px-2.py-1.bg-stone-100.rounded {{ statusText }}
 
-    .flex.gap-2(v-if="storage.auth.value")
-      button.btn.btn-primary(@click="createFile") 📄 New
-      label.btn.btn-secondary.cursor-pointer
+    .flex.items-center.gap-2(v-if="auth")
+      button.px-3.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.transition.text-sm.font-medium(
+        @click="handleNewFile"
+        :disabled="loading"
+        title="Create new file (Ctrl+N)"
+      ) 📄 New
+
+      label.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.cursor-pointer.text-sm.font-medium(
+        :class="{ 'opacity-50 cursor-not-allowed': loading }"
+      )
         | 📥 Import
-        input.hidden(ref="fileInput" type="file" @change="importFiles($event.target.files)")
-      button.btn.btn-secondary(
+        input.hidden(
+          ref="fileInput"
+          type="file"
+          multiple
+          :disabled="loading"
+          @change="handleImport($event.target.files)"
+        )
+
+      button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.text-sm.font-medium(
         v-if="hasFiles"
-        @click="storage.exportAll"
-        :disabled="storage.loading.value"
+        @click="handleExportAll"
+        :disabled="loading"
+        title="Export all files"
       ) 📦 Export All
 
+  //- Progress Bar
+  .mb-4(v-if="progressInfo")
+    .bg-stone-200.rounded-full.h-2.overflow-hidden
+      .bg-blue-600.h-full.transition-all.duration-300(
+        :style="{ width: `${(progressInfo.completed / progressInfo.total) * 100}%` }"
+      )
+    .text-xs.text-stone-600.mt-1.flex.justify-between
+      span Processing: {{ progressInfo.current }}
+      span {{ progressInfo.completed }} / {{ progressInfo.total }}
+
   //- Main Content
-  .grid.grid-cols-1.lg-grid-cols-2.gap-6.min-h-600px(v-if="storage.auth.value")
+  .grid.grid-cols-2.gap-2.min-h-600px(v-if="auth")
+    //- Sidebar - File List
+    .bg-stone-50.rounded-lg.border.border-stone-200
+      .p-4.border-b.border-stone-200.bg-white.rounded-t-lg
+        .flex.items-center.justify-between.mb-2
+          h3.m-0.font-semibold.text-stone-800 Files ({{ files.length }})
 
-    //- File List
-    .card
-      .card-header
-        h3 Files ({{ storage.filesList.value.length }})
-        .text-xs.text-stone-500(v-if="hasFiles")
+        .text-xs.text-stone-500.space-y-1(v-if="hasFiles")
           .flex.justify-between
-            span Total:
-            span.font-mono {{ formatSize(totalSize) }}
+            span Original:
+            span.font-mono {{ formatSize(stats.totalSize) }}
+          .flex.justify-between
+            span Compressed:
+            span.font-mono {{ formatSize(stats.compressedSize) }}
+          .flex.justify-between
+            span Saved:
+            span.font-mono.text-green-600 {{ stats.compressionRatio.toFixed(1) }}%
+          .flex.justify-between.border-t.border-stone-200.pt-1
+            span Est. DB size:
+            span.font-mono.font-medium {{ formatSize(stats.estimatedDbSize) }}
 
-      .card-body.max-h-400px.overflow-y-auto
+      .p-3.max-h-60svh.overflow-y-auto
         .space-y-2(v-if="hasFiles")
-          .file-item(
-            v-for="file in storage.filesList.value"
+          .group.p-3.rounded-lg.border.cursor-pointer.transition-all.hover-shadow-sm(
+            v-for="file in files"
             :key="file.name"
             @click="selectFile(file.name)"
-            :class="currentFile?.name.value === file.name ? 'active' : ''"
+            :class="selectedFile === file.name ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-stone-200 bg-white hover:border-stone-300'"
           )
             .flex.items-start.justify-between.mb-2
               .flex-1.min-w-0
-                .font-medium.truncate {{ file.name }}
+                .font-medium.truncate(
+                  :class="selectedFile === file.name ? 'text-blue-700' : 'text-stone-800'"
+                ) {{ file.name }}
                 .text-xs.text-stone-500.mt-1 {{ file.mime }}
 
-              .action-buttons
-                button.action-btn(@click.stop="startRename(file.name)" title="Rename") ✏️
-                button.action-btn.text-red-600(
-                  @click.stop="currentFile?.delete(); currentFile = null"
+              .flex.gap-1.opacity-0.group-hover-opacity-100.transition-opacity
+                button.p-2.rounded.hover-bg-stone-200.transition(
+                  @click.stop="startRename(file.name)"
+                  title="Rename"
+                ) ✏️
+                button.p-2.rounded.hover-bg-red-100.text-red-600.transition(
+                  @click.stop="confirmDelete(file.name)"
                   title="Delete"
                 ) 🗑️
 
-            .flex.justify-between.text-xs.text-stone-500
-              span {{ formatSize(file.size) }} • v{{ file.versions }}
+            .flex.items-center.justify-between.text-xs.text-stone-500
+              .flex.flex-col.gap-1
+                span {{ formatSize(file.size) }} • v{{ file.versions }}
+                span.text-green-600(v-if="file.compressedSize")
+                  | {{ formatSize(file.compressedSize) }} (-{{ getCompressionRatio(file.size, file.compressedSize).toFixed(1) }}%)
               span {{ formatDate(file.modified) }}
 
         //- Empty State
-        .text-center.py-12(v-else)
+        .text-center.py-12.px-4(v-else)
           .text-5xl.mb-3 📁
-          p.text-stone-500.font-medium No files yet
-          p.text-xs.text-stone-400 Create or drop files here
+          p.text-stone-500.font-medium.mb-2 No files yet
+          p.text-xs.text-stone-400 Create a new file or drop files here
 
-    //- Editor
-    .card.flex.flex-col
-      .card-header(v-if="currentFile?.name.value")
+    //- Editor Area
+    .bg-white.rounded-lg.border.border-stone-200.flex.flex-col
+      //- Editor Header
+      .px-6.py-4.border-b.border-stone-200.bg-stone-50(v-if="currentFile")
         .flex.items-center.justify-between
           .min-w-0.flex-1
-            h3.truncate {{ currentFile.name.value }}
-            .text-xs.text-stone-500.flex.gap-3
+            h3.m-0.font-semibold.text-stone-800.truncate {{ currentFile.filename }}
+            .text-xs.text-stone-500.mt-1.flex.items-center.gap-3
               span {{ currentFile.mime.value }}
-              span {{ formatSize(currentFile.text.value?.length || 0) }}
-              span.text-orange-600(v-if="currentFile.isDirty.value") ● Unsaved
+              span {{ formatSize(currentFile.bytes.value.length) }}
+              span.text-orange-600.font-medium(v-if="currentFile.dirty.value") ● Unsaved
 
           .flex.gap-2
-            button.btn.btn-secondary(
-              @click="currentFile.export"
-              :disabled="currentFile.isLoading.value"
+            button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.text-sm(
+              @click="currentFile.export()"
+              :disabled="currentFile.loading.value"
+              title="Export file (Ctrl+E)"
             ) 📤 Export
-            button.btn.btn-primary(
-              @click="currentFile.save"
-              :disabled="currentFile.isLoading.value || !currentFile.isDirty.value"
+
+            button.px-3.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.transition.text-sm.font-medium(
+              @click="currentFile.save()"
+              :disabled="currentFile.loading.value || !currentFile.dirty.value"
+              title="Save (Ctrl+S)"
             ) 💾 Save
 
       //- Editor Content
       .flex-1.flex.flex-col
-        textarea.flex-1.border-none.p-6.font-mono.text-sm.resize-none.outline-none(
-          v-if="currentFile?.name.value"
+        //- Text Editor
+        textarea.flex-1.border-none.p-6.font-mono.text-sm.leading-relaxed.resize-none.outline-none.bg-white(
+          v-if="canEdit"
           v-model="currentFile.text.value"
-          :disabled="currentFile.isLoading.value"
-          placeholder="Start typing..."
+          :disabled="currentFile.loading.value"
+          placeholder="Start typing your content..."
           spellcheck="false"
         )
 
+        //- Image Viewer
+        .flex-1.flex.items-center.justify-center.bg-stone-50.p-6(
+          v-else-if="isImage && blobUrl"
+        )
+          img.max-w-full.max-h-70vh.object-contain.rounded.shadow-lg(
+            :src="blobUrl"
+            :alt="currentFile.filename"
+          )
+
+        //- Binary File Info
+        .flex-1.flex.flex-col.items-center.justify-center.bg-stone-50.p-10.text-center(
+          v-else-if="currentFile"
+        )
+          .text-6xl.mb-4 📄
+          h4.m-0.mb-2.font-semibold.text-stone-700 Binary File
+          p.m-0.text-stone-500.mb-4 {{ formatSize(currentFile.bytes.value.length) }} • {{ currentFile.mime.value }}
+          button.px-4.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.transition(
+            @click="currentFile.export()"
+          ) 📤 Download File
+
         //- Welcome Screen
-        .flex-1.flex.flex-col.items-center.justify-center.text-center.p-10(v-else)
+        .flex-1.flex.flex-col.items-center.justify-center.text-center.p-10(
+          v-else-if="!currentFile?.loading.value && !loading"
+        )
           .text-7xl.mb-4 🔒
-          h2.text-xl.font-semibold.text-stone-700.mb-3 Welcome to Secure Vault
-          p.text-stone-500.mb-6.max-w-md Select a file or create a new one to get started.
+          h2.m-0.mb-3.text-xl.font-semibold.text-stone-700 Secure Vault
+          p.m-0.text-stone-500.mb-6.max-w-md
+            | Select a file from the sidebar or create a new one to get started.
+
           .text-xs.text-stone-400.space-y-1
             p Ctrl+N - New file
-            p Ctrl+S - Save file  
+            p Ctrl+S - Save file
             p Ctrl+E - Export file
+            p Drag & drop files to import
+
+        //- Loading Screen
+        .flex.flex-col.items-center.justify-center.min-h-300.text-center(v-else)
+          .text-7xl.mb-4 🔒
+          h2.text-xl.font-semibold.text-stone-700.mb-2 Secure Vault
+          p.text-stone-500.mb-6 {{ loading ? 'Initializing worker...' : 'Loading file...' }}
+          .w-6.h-6.border-2.border-stone-300.border-t-blue-600.rounded-full.animate-spin
 
   //- Rename Dialog
-  .modal(v-if="showRename")
-    .modal-content
-      h3.mb-4 Rename File
-      input.rename-input.w-full.input(
+  .fixed.inset-0.bg-black-50.flex.items-center.justify-center.z-50.p-4(
+    v-if="showRenameDialog"
+  )
+    .bg-white.rounded-lg.shadow-xl.w-full.max-w-md.p-6
+      h3.m-0.mb-4.text-lg.font-semibold.text-stone-800 Rename File
+      input.rename-input.w-full.px-3.py-2.border.border-stone-300.rounded.mb-4(
         v-model="newName"
         @keydown.enter="confirmRename"
-        @keydown.escape="showRename = false"
-        placeholder="Enter new name"
+        @keydown.escape="cancelRename"
+        type="text"
+        placeholder="Enter new file name"
       )
-      .flex.justify-end.gap-3.mt-4
-        button.btn.btn-secondary(@click="showRename = false") Cancel
-        button.btn.btn-primary(@click="confirmRename") Rename
+      .flex.justify-end.gap-3
+        button.px-4.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition(
+          @click="cancelRename"
+        ) Cancel
+        button.px-4.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.transition(
+          @click="confirmRename"
+        ) Rename
 </template>
 
 <style scoped>
-.btn {
-  @apply px-3 py-2 rounded text-sm font-medium transition-colors;
-}
-
-.btn-primary {
-  @apply bg-blue-600 text-white hover:bg-blue-700;
-}
-
-.btn-secondary {
-  @apply border border-stone-300 bg-white text-stone-700 hover:bg-stone-50;
-}
-
-.btn:disabled {
-  @apply opacity-50 cursor-not-allowed;
-}
-
-.card {
-  @apply bg-stone-50 rounded-lg border border-stone-200;
-}
-
-.card-header {
-  @apply p-4 border-b border-stone-200 bg-white rounded-t-lg;
-}
-
-.card-body {
-  @apply p-3;
-}
-
-.file-item {
-  @apply group p-3 rounded-lg border cursor-pointer transition-all border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm;
-}
-
-.file-item.active {
-  @apply border-blue-500 bg-blue-50 shadow-sm;
-}
-
-.action-buttons {
-  @apply flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity;
-}
-
-.action-btn {
-  @apply p-2 rounded hover:bg-stone-200 transition-colors;
-}
-
-.input {
-  @apply px-3 py-2 border border-stone-300 rounded;
-}
-
-.modal {
-  @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4;
-}
-
-.modal-content {
-  @apply bg-white rounded-lg shadow-xl w-full max-w-md p-6;
-}
-
 .overflow-y-auto::-webkit-scrollbar {
-  @apply w-1.5;
+  width: 6px;
 }
 
 .overflow-y-auto::-webkit-scrollbar-track {
-  @apply bg-stone-100 rounded;
+  background: #f1f5f9;
+  border-radius: 3px;
 }
 
 .overflow-y-auto::-webkit-scrollbar-thumb {
-  @apply bg-stone-300 rounded hover:bg-stone-400;
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 </style>

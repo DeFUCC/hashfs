@@ -1,6 +1,6 @@
 {
 	"name": "hashfs",
-	"version": "0.1.1",
+	"version": "0.2.0",
 	"description": "Content-addressed secure file storage in a browser tab",
 	"type": "module",
 	"homepage": "https://github.com/DeFUCC/hashfs",
