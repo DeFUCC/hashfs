@@ -1,6 +1,6 @@
 <script setup vapor>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
-import HashFS from './worker/HashFS.vue';
+import HashFS from './src/HashFS.vue';
 import { version } from './package.json'
 
 const inp = ref('')

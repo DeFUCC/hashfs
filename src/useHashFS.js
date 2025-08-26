@@ -1,5 +1,5 @@
 // Vue 3 Composable - HashFS with Web Workers
-import { ref, computed, reactive, onBeforeUnmount, nextTick } from 'vue';
+import { ref, computed, onBeforeUnmount } from 'vue';
 import HashFSWorker from './hashfs-worker.js?worker&inline'
 import BulkWorker from './bulk-worker.js?worker&inline'
 
