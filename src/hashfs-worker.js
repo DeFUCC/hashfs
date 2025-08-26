@@ -246,6 +246,7 @@ class HashFSWorker {
     const entries = {};
     const items = Object.entries(this.metadata.files);
     let completed = 0;
+    const metaMap = {};
 
     for (const [name, meta] of items) {
       if (meta.activeKey) {
@@ -256,6 +257,8 @@ class HashFSWorker {
 
           // Add file content as Uint8Array; ZIP will preserve full path in keys
           entries[name] = new Uint8Array(content);
+          // preserve MIME type for round-trip
+          metaMap[name] = meta.mime || 'application/octet-stream';
         } catch (e) {
           console.warn(`Export ZIP failed for ${name}:`, e);
         }
@@ -265,6 +268,14 @@ class HashFSWorker {
       if (operationId) {
         self.postMessage({ type: 'progress', operationId, completed, total: items.length, current: name });
       }
+    }
+
+    // Attach metadata manifest so we can restore MIME types on import
+    try {
+      const metaBytes = encoder.encode(JSON.stringify({ mimes: metaMap }));
+      entries['.hashfs_meta.json'] = metaBytes;
+    } catch (e) {
+      console.warn('Failed to encode export metadata:', e);
     }
 
     // Create ZIP (Uint8Array)
@@ -280,16 +291,38 @@ class HashFSWorker {
     try {
       const u8 = new Uint8Array(arrayBuffer);
       const decompressed = compress.unzip(u8);
+      // Parse metadata manifest if present to recover original MIME types
+      let metaMap = {};
+      if (decompressed['.hashfs_meta.json']) {
+        try {
+          const raw = decompressed['.hashfs_meta.json'];
+          const rawU8 = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+          const parsed = JSON.parse(decoder.decode(rawU8));
+          metaMap = parsed && parsed.mimes ? parsed.mimes : {};
+        } catch (e) {
+          console.warn('Failed to parse ZIP metadata:', e);
+        }
+      }
+
       const entries = Object.entries(decompressed);
       let completed = 0;
 
       for (const [filepath, data] of entries) {
+        // skip internal metadata file
+        if (filepath === '.hashfs_meta.json') {
+          completed++;
+          if (operationId) {
+            self.postMessage({ type: 'progress', operationId, completed, total: entries.length, current: filepath });
+          }
+          continue;
+        }
+
         try {
           const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
 
           const transferData = {
             filename: filepath,
-            mime: 'application/octet-stream',
+            mime: metaMap[filepath] || 'application/octet-stream',
             bytes: bytes.buffer,
             size: bytes.length
           };
