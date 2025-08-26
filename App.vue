@@ -29,6 +29,7 @@ watch(passphrase, (val) => {
 <template lang="pug">
 .font-mono.mx-auto.pt-20.flex.flex-col.gap-4
   form.p-4.flex.flex-col.gap-4.max-w-55ch.mx-auto(v-if="!passphrase" @submit.prevent="passphrase = inp; inp = null")
+    img.w-30(:src="'/logo.svg'")
     .flex.items-baseline.gap-2
       .text-5xl HashFS
       .text-sm.op-50 v.{{ version }}

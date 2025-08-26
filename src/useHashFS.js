@@ -251,11 +251,28 @@ export function useHashFS(passphrase, options = {}) {
   // Initialize on first call
   init();
 
+  function close() {
+
+    hashfsWorker?.terminate()
+    hashfsWorker = null;
+    bulkWorker?.terminate()
+    bulkWorker = null;
+
+    Object.assign(globalState, {
+      auth: ref(false),
+      files: ref([]),
+      fileBuffers: new Map(),
+      progressHandlers: new Map(),
+      workerManager: new WorkerManager()
+    })
+  }
+
   return {
     auth: globalState.auth,
     files: globalState.files,
     stats,
     loading,
+    close,
     importAll,
     exportAll,
     useFile: (filename, initialContent, fileOptions) =>

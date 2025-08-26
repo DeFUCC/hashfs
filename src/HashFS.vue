@@ -8,7 +8,7 @@ const props = defineProps({
 })
 
 const {
-  auth, files, stats, loading, importAll, exportAll, useFile
+  auth, files, stats, loading, close, importAll, exportAll, useFile
 } = useHashFS(props.passphrase)
 
 // UI state
@@ -290,8 +290,9 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
 })
 
-onBeforeUnmount(() => {
+onBeforeUnmount(async () => {
   window.removeEventListener('keydown', handleKeydown)
+  await close()
 })
 </script>
 
@@ -305,7 +306,8 @@ onBeforeUnmount(() => {
   //- Header
   header.flex.items-center.justify-between.mb-6.pb-4.border-b.border-stone-300.gap-2
     .flex.items-center.gap-3.gap-2
-      h1.m-0.text-2xl.font-bold.text-stone-800.flex.items-center.gap-2 🔒 #FS 
+      img.w-10(:src="'/logo.svg'")
+      h1.m-0.text-2xl.font-bold.text-stone-800.flex.items-center.gap-2 #FS 
       a.text-xs.op-40(href="https://www.npmjs.com/package/hashfs" target="_blank") v.{{ version }}
       .text-sm.text-stone-500.px-2.py-1.bg-stone-100.rounded {{ statusText }}
 
