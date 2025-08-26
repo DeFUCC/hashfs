@@ -1,4 +1,4 @@
-import { deflate, inflate } from 'fflate';
+import { deflate, inflate, zipSync, unzipSync } from 'fflate';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
 import { sha256 } from '@noble/hashes/sha256.js';
@@ -6,8 +6,8 @@ import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { gcm } from '@noble/ciphers/aes.js';
 
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+export const encoder = new TextEncoder();
+export const decoder = new TextDecoder();
 
 // Core crypto utilities
 export const cryptoUtils = {
@@ -58,6 +58,10 @@ export const compress = {
   inflate: (bytes) => new Promise((resolve, reject) =>
     inflate(bytes, (err, result) => err ? reject(err) : resolve(result)))
 };
+
+// ZIP helpers (sync) exposed for worker usage
+compress.zip = (entries, opts) => zipSync(entries, opts);
+compress.unzip = (u8) => unzipSync(u8);
 
 // Chain management with improved caching
 export function createChainManager(db, encKey, maxCache = 20) {

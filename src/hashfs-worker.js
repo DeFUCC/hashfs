@@ -1,10 +1,6 @@
 // HashFS Web Worker - Handles crypto, storage, and chain management
 import { openDB } from 'idb';
-import { cryptoUtils, compress, createChainManager } from './crypto.js';
-import { zipSync, unzipSync } from 'fflate';
-
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+import { cryptoUtils, compress, createChainManager, encoder, decoder } from './crypto.js';
 
 class HashFSWorker {
   constructor() {
@@ -51,18 +47,37 @@ class HashFSWorker {
     }
   }
 
-  async loadFile(filename) {
+  async loadFile(filename, version = null) {
     if (!this.auth) throw new Error('Not authenticated');
 
     const meta = this.metadata.files[filename];
     if (!meta?.activeKey) return { bytes: new Uint8Array(), mime: 'text/plain' };
 
     try {
-      const encrypted = await this.db.get('files', meta.activeKey);
+      // Get file chain
+      const chain = await this.chainManager.getChain(meta.chainId);
+
+      // Determine which version to load
+      let targetVersion;
+      if (version === null) {
+        // Load latest
+        targetVersion = chain.versions[chain.versions.length - 1];
+      } else {
+        // Find specific version
+        targetVersion = chain.versions.find(v => v.version === version);
+        if (!targetVersion) {
+          throw new Error(`Version ${version} not found`);
+        }
+      }
+
+      const encrypted = await this.db.get('files', targetVersion.key);
       if (!encrypted) {
-        delete this.metadata.files[filename];
-        await this.saveMetadata();
-        throw new Error(`File "${filename}" is corrupted`);
+        if (version === null) {
+          // Latest version is corrupted - remove file
+          delete this.metadata.files[filename];
+          await this.saveMetadata();
+        }
+        throw new Error(`File "${filename}" version ${version || 'latest'} is corrupted`);
       }
 
       const decrypted = await cryptoUtils.decrypt(encrypted, this.keys.encKey);
@@ -70,18 +85,21 @@ class HashFSWorker {
 
       // Verify integrity
       const hash = cryptoUtils.hash(inflated);
-      const chain = await this.chainManager.getChain(meta.chainId);
-      const latest = chain.versions[chain.versions.length - 1];
-
-      if (!latest || hash !== latest.hash || !this.keys.verify(hash, latest.sig)) {
+      if (hash !== targetVersion.hash || !this.keys.verify(hash, targetVersion.sig)) {
         throw new Error('Integrity verification failed');
       }
 
-      // Return transferable buffer
+      // Return transferable buffer with version info
       return {
         bytes: inflated.slice(), // Transfer ownership
         mime: meta.mime,
-        size: inflated.length
+        size: inflated.length,
+        version: targetVersion.version,
+        currentVersion: meta.headVersion,
+        availableVersions: {
+          min: chain.versions[0]?.version || 0,
+          max: chain.versions[chain.versions.length - 1]?.version || 0
+        }
       };
 
     } catch (error) {
@@ -250,7 +268,7 @@ class HashFSWorker {
     }
 
     // Create ZIP (Uint8Array)
-    const zipped = zipSync(entries, { level: 6 });
+    const zipped = compress.zip(entries, { level: 6 });
     return zipped; // Uint8Array
   }
 
@@ -261,7 +279,7 @@ class HashFSWorker {
     const results = [];
     try {
       const u8 = new Uint8Array(arrayBuffer);
-      const decompressed = unzipSync(u8);
+      const decompressed = compress.unzip(u8);
       const entries = Object.entries(decompressed);
       let completed = 0;
 
@@ -419,7 +437,8 @@ self.onmessage = async (e) => {
         result = await worker.init(data.passphrase);
         break;
       case 'load':
-        result = await worker.loadFile(data.filename);
+        // forward optional version parameter so the worker can load a specific version
+        result = await worker.loadFile(data.filename, data.version);
         break;
       case 'save':
         result = await worker.saveFile(data.filename, data);
@@ -455,6 +474,11 @@ self.onmessage = async (e) => {
     // If result is a Uint8Array (zip), transfer its buffer
     if (result instanceof Uint8Array) {
       transferable.push(result.buffer);
+    }
+
+    // If result is an object containing bytes (file load), transfer the ArrayBuffer
+    if (result && result.bytes instanceof Uint8Array) {
+      transferable.push(result.bytes.buffer);
     }
 
     // If result is an array of items with data.bytes ArrayBuffer, transfer those

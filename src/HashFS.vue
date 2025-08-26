@@ -26,6 +26,20 @@ const currentFile = computed(() =>
   selectedFile.value ? useFile(selectedFile.value) : null
 )
 
+// Proxies for nested reactive properties inside the file instance
+const canUndo = computed(() => !!(currentFile.value && currentFile.value.canUndo && currentFile.value.canUndo.value))
+const canRedo = computed(() => !!(currentFile.value && currentFile.value.canRedo && currentFile.value.canRedo.value))
+const currentVersion = computed(() => currentFile.value?.currentVersion?.value ?? 0)
+const availableVersions = computed(() => currentFile.value?.availableVersions?.value ?? { min: 0, max: 0 })
+const currentMime = computed(() => currentFile.value?.mime?.value ?? '')
+const currentLoading = computed(() => !!(currentFile.value && currentFile.value.loading && currentFile.value.loading.value))
+const currentDirty = computed(() => !!(currentFile.value && currentFile.value.dirty && currentFile.value.dirty.value))
+const currentBytesLength = computed(() => currentFile.value?.bytes?.value?.length ?? 0)
+const currentText = computed({
+  get: () => currentFile.value?.text?.value ?? '',
+  set: (v) => { if (currentFile.value?.text) currentFile.value.text.value = v }
+})
+
 // UI helpers
 const hasFiles = computed(() => files.value.length > 0)
 const canEdit = computed(() => {
@@ -274,27 +288,24 @@ async function handleDrop(e) {
   }
 }
 
-// Keyboard shortcuts
+
+
 function handleKeydown(e) {
-  if (e.ctrlKey || e.metaKey) {
-    switch (e.key) {
-      case 's':
-        e.preventDefault()
-        currentFile.value?.save()
-        break
-      case 'e':
-        e.preventDefault()
-        currentFile.value?.export()
-        break
-      case 'n':
-        e.preventDefault()
-        handleNewFile()
-        break
+  // Use meta/ctrl + z for undo, meta/ctrl + shift + z for redo
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    if (e.shiftKey) {
+      currentFile.value?.canRedo && currentFile.value.redo();
+    } else {
+      currentFile.value?.canUndo && currentFile.value.undo();
     }
+    e.preventDefault();
+    return;
   }
 
-  if (e.key === 'Escape') {
-    showRenameDialog.value = false
+  // Save/Export shortcuts
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    currentFile.value?.save && currentFile.value.save();
+    e.preventDefault();
   }
 }
 
@@ -436,25 +447,49 @@ onBeforeUnmount(async () => {
     //- Editor Area
     .bg-white.rounded-lg.border.border-stone-200.flex.flex-col
       //- Editor Header
+      .flex.items-center.justify-between.border-b.border-stone-200.p-4(v-if="currentFile")
+        .flex.items-center.gap-2
+          h3.text-lg.font-medium.text-stone-800.m-0 {{ currentFile.filename }}
+          span.text-sm.text-stone-500.bg-stone-100.rounded.px-2 {{ currentFile.mime.value }}
+        .flex.items-center.gap-2
+          //- Version info
+          .text-sm.text-stone-600.px-2(v-if="availableVersions.max > 0")
+            | v.{{ currentVersion }} 
+            //- span.text-stone-400 ({{ availableVersions.min }}-{{ availableVersions.max }})
+
+          //- Undo/Redo buttons  
+          button.px-2.py-1.rounded.bg-stone-100.text-stone-700.hover-bg-stone-200.transition.disabled-opacity-50.disabled-cursor-not-allowed(
+            :disabled="!canUndo"
+            title="Undo (Ctrl+Z)"
+            @click="currentFile.undo()"
+          ) ↩ Undo 
+            span(v-if="Math.max(0, currentVersion - (availableVersions.min || 0))") {{ Math.max(0, currentVersion - (availableVersions.min || 0)) }}
+
+          button.px-2.py-1.rounded.bg-stone-100.text-stone-700.hover-bg-stone-200.transition.disabled-opacity-50.disabled-cursor-not-allowed(
+            :disabled="!canRedo"
+            title="Redo (Ctrl+Shift+Z)"
+            @click="currentFile.redo()"
+          ) ↪ Redo 
+            span(v-if="Math.max(0, (availableVersions.max || 0) - currentVersion)") {{ Math.max(0, (availableVersions.max || 0) - currentVersion) }}
       .px-6.py-4.border-b.border-stone-200.bg-stone-50(v-if="currentFile")
         .flex.items-center.justify-between
           .min-w-0.flex-1
             h3.m-0.font-semibold.text-stone-800.truncate {{ currentFile.filename }}
             .text-xs.text-stone-500.mt-1.flex.items-center.gap-3
-              span {{ currentFile.mime.value }}
-              span {{ formatSize(currentFile.bytes.value.length) }}
-              span.text-orange-600.font-medium(v-if="currentFile.dirty.value") ● Unsaved
+              span {{ currentMime }}
+              span {{ formatSize(currentBytesLength) }}
+              span.text-orange-600.font-medium(v-if="currentDirty") ● Unsaved
 
           .flex.gap-2
             button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.text-sm(
               @click="currentFile.export()"
-              :disabled="currentFile.loading.value"
+              :disabled="currentLoading"
               title="Export file (Ctrl+E)"
             ) 📤 Export
 
             button.px-3.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.transition.text-sm.font-medium(
               @click="currentFile.save()"
-              :disabled="currentFile.loading.value || !currentFile.dirty.value"
+              :disabled="currentLoading || !currentDirty"
               title="Save (Ctrl+S)"
             ) 💾 Save
 
@@ -463,8 +498,8 @@ onBeforeUnmount(async () => {
         //- Text Editor
         textarea.flex-1.border-none.p-6.font-mono.text-sm.leading-relaxed.resize-none.outline-none.bg-white(
           v-if="canEdit"
-          v-model="currentFile.text.value"
-          :disabled="currentFile.loading.value"
+          v-model="currentText"
+          :disabled="currentLoading"
           placeholder="Start typing your content..."
           spellcheck="false"
         )
@@ -484,7 +519,7 @@ onBeforeUnmount(async () => {
         )
           .text-6xl.mb-4 📄
           h4.m-0.mb-2.font-semibold.text-stone-700 Binary File
-          p.m-0.text-stone-500.mb-4 {{ formatSize(currentFile.bytes.value.length) }} • {{ currentFile.mime.value }}
+            p.m-0.text-stone-500.mb-4 {{ formatSize(currentBytesLength) }} • {{ currentMime }}
           button.px-4.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.transition(
             @click="currentFile.export()"
           ) 📤 Download File

@@ -253,8 +253,13 @@ export function useHashFS(passphrase, options = {}) {
     exportZip,
     importZip,
     downloadVault,
-    useFile: (filename, initialContent, fileOptions) =>
-      createFileInstance(filename, initialContent, fileOptions, fileInstances)
+    useFile: (filename, initialContent, fileOptions) => {
+      // Return a cached instance per filename so UI bindings reference a stable object
+      if (fileInstances.has(filename)) return fileInstances.get(filename);
+      const inst = createFileInstance(filename, initialContent, fileOptions);
+      fileInstances.set(filename, inst);
+      return inst;
+    }
   };
 }
 
@@ -267,6 +272,12 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
   const mime = ref('text/plain');
   const dirty = ref(false);
   const bufferKey = ref(null);
+
+  // Version control state
+  const currentVersion = ref(0);
+  const availableVersions = ref({ min: 0, max: 0 });
+  const canUndo = computed(() => currentVersion.value > availableVersions.value.min);
+  const canRedo = computed(() => currentVersion.value < availableVersions.value.max);
 
   let saveTimer = null;
   const scheduleAutoSave = () => {
@@ -293,7 +304,7 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
     }
   });
 
-  async function load() {
+  async function load(version = null) {
     if (!globalState.auth.value) throw new Error('Not authenticated');
 
     // Handle initial content for new files
@@ -301,20 +312,22 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
       if (typeof initialContent === 'string') {
         bytes.value = encoder.encode(initialContent);
         mime.value = fileOptions.mime || 'text/plain';
-      } else if (initialContent instanceof Uint8Array) {
-        bytes.value = initialContent;
-        mime.value = fileOptions.mime || 'application/octet-stream';
+      } else {
+        dirty.value = true;
       }
-      dirty.value = true;
       return;
     }
 
     loading.value = true;
     try {
-      const result = await globalState.workerManager.sendToWorker('load', { filename });
+      const result = await globalState.workerManager.sendToWorker('load', { filename, version });
 
-      if (result.bytes) bytes.value = new Uint8Array(result.bytes);
-      mime.value = result.mime || 'application/octet-stream';
+      if (result.bytes) {
+        bytes.value = new Uint8Array(result.bytes);
+        mime.value = result.mime || 'application/octet-stream';
+        currentVersion.value = result.version;
+        availableVersions.value = result.availableVersions;
+      }
       dirty.value = false;
 
     } catch (error) {
@@ -325,7 +338,15 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
     }
   }
 
-  async function save() {
+  async function undo() {
+    if (!canUndo.value) return;
+    await load(currentVersion.value - 1);
+  }
+
+  async function redo() {
+    if (!canRedo.value) return;
+    await load(currentVersion.value + 1);
+  } async function save() {
     if (!dirty.value || !globalState.auth.value) return;
 
     try {
@@ -340,6 +361,15 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
       if (result.success) {
         dirty.value = false;
         if (result.files) globalState.files.value = result.files;
+        // Update version info immediately so UI reflects new head version
+        if (result.version) {
+          currentVersion.value = result.version;
+          const prev = availableVersions.value || { min: result.version, max: result.version };
+          availableVersions.value = {
+            min: prev.min || result.version,
+            max: Math.max(prev.max || 0, result.version)
+          };
+        }
       } else {
         throw new Error(result.error || 'Save failed');
       }
@@ -430,6 +460,14 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
     text,
     bytes,
     dirty,
+    // Version control
+    currentVersion,
+    availableVersions,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    // File operations
     load,
     save,
     rename,
