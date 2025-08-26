@@ -1,85 +1,48 @@
 // Vue 3 Composable - HashFS with Web Workers
 import { ref, computed, onBeforeUnmount } from 'vue';
 import HashFSWorker from './hashfs-worker.js?worker&inline'
-import BulkWorker from './bulk-worker.js?worker&inline'
-
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-// Global worker instances
+// Global worker instance and request tracking
 let hashfsWorker = null;
-let bulkWorker = null;
-
-// Request ID counter
 let requestId = 0;
-
-// Pending requests
 const pendingRequests = new Map();
 
 class WorkerManager {
   constructor() {
-    this.initWorkers();
+    this.initWorker();
   }
 
-  initWorkers() {
+  initWorker() {
     if (!hashfsWorker) {
       hashfsWorker = new HashFSWorker();
-      hashfsWorker.onmessage = this.handleHashfsMessage.bind(this);
-      hashfsWorker.onerror = this.handleWorkerError.bind(this);
-    }
-
-    if (!bulkWorker) {
-      bulkWorker = new BulkWorker();
-      bulkWorker.onmessage = this.handleBulkMessage.bind(this);
-      bulkWorker.onerror = this.handleWorkerError.bind(this);
+      hashfsWorker.onmessage = this.handleMessage.bind(this);
+      hashfsWorker.onerror = error => console.error('Worker error:', error);
     }
   }
 
-  handleHashfsMessage(e) {
-    const { id, success, result, error } = e.data;
-    const request = pendingRequests.get(id);
-
-    if (request) {
-      pendingRequests.delete(id);
-
-      if (success) {
-        request.resolve(result);
-      } else {
-        request.reject(new Error(error));
-      }
-    }
-  }
-
-  handleBulkMessage(e) {
+  handleMessage(e) {
     const { id, success, result, error, type, operationId } = e.data;
 
-    if (type === 'progress') {
-      // Handle progress updates
-      const progressHandlers = globalState.progressHandlers.get(operationId);
-      if (progressHandlers) {
-        progressHandlers.forEach(handler => handler(e.data));
-      }
+    // Handle progress updates
+    if (type === 'progress' && operationId) {
+      const handlers = globalState.progressHandlers.get(operationId);
+      if (handlers) handlers.forEach(handler => handler(e.data));
       return;
     }
 
+    // Handle request completion
     const request = pendingRequests.get(id);
     if (request) {
       pendingRequests.delete(id);
-
-      if (success) {
-        request.resolve(result);
-      } else {
-        request.reject(new Error(error));
-      }
+      if (success) request.resolve(result);
+      else request.reject(new Error(error));
     }
   }
 
-  handleWorkerError(e) {
-    console.error('Worker error:', e);
-  }
-
-  async sendToHashfsWorker(type, data = {}) {
+  async sendToWorker(type, data = {}, operationId = null) {
     const id = ++requestId;
 
     return new Promise((resolve, reject) => {
@@ -87,26 +50,10 @@ class WorkerManager {
 
       // Determine transferable objects
       const transferable = [];
-      if (data.bytes instanceof ArrayBuffer) {
-        transferable.push(data.bytes);
-      }
+      if (data.bytes instanceof ArrayBuffer) transferable.push(data.bytes);
+      if (data.arrayBuffer instanceof ArrayBuffer) transferable.push(data.arrayBuffer);
 
-      hashfsWorker.postMessage({ id, type, data }, transferable);
-    });
-  }
-
-  async sendToBulkWorker(type, data = {}, operationId = null) {
-    const id = ++requestId;
-
-    return new Promise((resolve, reject) => {
-      pendingRequests.set(id, { resolve, reject });
-
-      const transferable = [];
-      if (data.arrayBuffer instanceof ArrayBuffer) {
-        transferable.push(data.arrayBuffer);
-      }
-
-      bulkWorker.postMessage({ id, type, data, operationId }, transferable);
+      hashfsWorker.postMessage({ id, type, data, operationId }, transferable);
     });
   }
 }
@@ -145,7 +92,7 @@ export function useHashFS(passphrase, options = {}) {
 
     loading.value = true;
     try {
-      const result = await globalState.workerManager.sendToHashfsWorker('init', { passphrase });
+      const result = await globalState.workerManager.sendToWorker('init', { passphrase });
 
       if (result.success) {
         globalState.auth.value = true;
@@ -160,51 +107,40 @@ export function useHashFS(passphrase, options = {}) {
     }
   }
 
-  // Bulk import
+  // Import multiple files
   async function importAll(fileList, onProgress = null) {
     const operationId = 'import_' + Date.now();
-
-    if (onProgress) {
-      globalState.progressHandlers.set(operationId, [onProgress]);
-    }
+    if (onProgress) globalState.progressHandlers.set(operationId, [onProgress]);
 
     try {
-      // Process files in bulk worker
-      const bulkResults = await globalState.workerManager.sendToBulkWorker(
-        'import',
-        { files: Array.from(fileList) },
-        operationId
-      );
+      // Convert FileList to array of { name, bytes, type }
+      const filesData = [];
+      for (const file of fileList) {
+        const arrayBuffer = await file.arrayBuffer();
+        filesData.push({
+          name: file.name,
+          bytes: arrayBuffer,
+          type: file.type || 'application/octet-stream'
+        });
+      }
 
-      // Save each file through main worker
+      // Process all files in the worker
+      const items = await globalState.workerManager.sendToWorker('import-files', { files: filesData }, operationId);
+
+      // Save all files and track results
       const saveResults = [];
-      for (const item of bulkResults) {
+      for (const item of items) {
         if (item.success) {
           try {
-            const saveResult = await globalState.workerManager.sendToHashfsWorker(
-              'save',
-              item.data
-            );
-
-            if (saveResult.success) {
+            const res = await globalState.workerManager.sendToWorker('save', item.data);
+            if (res.success) {
               saveResults.push({ name: item.name, success: true });
-              // Update file list
-              if (saveResult.files) {
-                globalState.files.value = saveResult.files;
-              }
+              if (res.files) globalState.files.value = res.files;
             } else {
-              saveResults.push({
-                name: item.name,
-                success: false,
-                error: saveResult.error
-              });
+              saveResults.push({ name: item.name, success: false, error: res.error });
             }
-          } catch (error) {
-            saveResults.push({
-              name: item.name,
-              success: false,
-              error: error.message
-            });
+          } catch (err) {
+            saveResults.push({ name: item.name, success: false, error: err.message });
           }
         } else {
           saveResults.push(item);
@@ -212,39 +148,65 @@ export function useHashFS(passphrase, options = {}) {
       }
 
       return saveResults;
-
     } finally {
-      if (onProgress) {
-        globalState.progressHandlers.delete(operationId);
-      }
+      if (onProgress) globalState.progressHandlers.delete(operationId);
     }
+  }  // Export all files
+  async function exportAll(onProgress = null) {
+    return exportZip(onProgress); // Use ZIP export by default now
   }
 
-  // Bulk export
-  async function exportAll(onProgress = null) {
-    const operationId = 'export_' + Date.now();
+  // Export entire vault as a ZIP (returns Uint8Array)
+  async function exportZip(onProgress = null) {
+    const operationId = 'exportzip_' + Date.now();
 
     if (onProgress) {
       globalState.progressHandlers.set(operationId, [onProgress]);
     }
 
     try {
-      // Get all file data from main worker
-      const exportData = await globalState.workerManager.sendToHashfsWorker('export-all');
-
-      // Process through bulk worker for efficient handling
-      const processed = await globalState.workerManager.sendToBulkWorker(
-        'export',
-        { fileData: exportData },
-        operationId
-      );
-
-      return processed;
-
+      const zipped = await globalState.workerManager.sendToWorker('export-zip', { operationId });
+      // zipped is a Uint8Array (transfered)
+      return zipped;
     } finally {
-      if (onProgress) {
-        globalState.progressHandlers.delete(operationId);
+      if (onProgress) globalState.progressHandlers.delete(operationId);
+    }
+  }
+
+  // Import a ZIP ArrayBuffer and write files into the vault. Returns per-file results.
+  async function importZip(arrayBuffer, onProgress = null) {
+    const operationId = 'importzip_' + Date.now();
+
+    if (onProgress) {
+      globalState.progressHandlers.set(operationId, [onProgress]);
+    }
+
+    try {
+      // Send zip to worker; worker will return an array of items with transferable bytes
+      const items = await globalState.workerManager.sendToWorker('import-zip', { arrayBuffer, operationId });
+
+      const saveResults = [];
+      for (const item of items) {
+        if (item.success) {
+          try {
+            const res = await globalState.workerManager.sendToWorker('save', item.data);
+            if (res.success) {
+              saveResults.push({ name: item.name, success: true });
+              if (res.files) globalState.files.value = res.files;
+            } else {
+              saveResults.push({ name: item.name, success: false, error: res.error });
+            }
+          } catch (err) {
+            saveResults.push({ name: item.name, success: false, error: err.message });
+          }
+        } else {
+          saveResults.push(item);
+        }
       }
+
+      return saveResults;
+    } finally {
+      if (onProgress) globalState.progressHandlers.delete(operationId);
     }
   }
 
@@ -255,8 +217,6 @@ export function useHashFS(passphrase, options = {}) {
 
     hashfsWorker?.terminate()
     hashfsWorker = null;
-    bulkWorker?.terminate()
-    bulkWorker = null;
 
     Object.assign(globalState, {
       auth: ref(false),
@@ -267,6 +227,24 @@ export function useHashFS(passphrase, options = {}) {
     })
   }
 
+  // UI helper to safely trigger zip download with progress
+  async function downloadVault(filename = 'vault.zip', onProgress = null) {
+    try {
+      const zipped = await exportZip(onProgress);
+      const blob = new Blob([zipped], { type: 'application/zip' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      return true;
+    } catch (error) {
+      console.error('Download failed:', error);
+      return false;
+    }
+  }
+
   return {
     auth: globalState.auth,
     files: globalState.files,
@@ -275,6 +253,9 @@ export function useHashFS(passphrase, options = {}) {
     close,
     importAll,
     exportAll,
+    exportZip,
+    importZip,
+    downloadVault,
     useFile: (filename, initialContent, fileOptions) =>
       createFileInstance(filename, initialContent, fileOptions, fileInstances)
   };
@@ -333,12 +314,9 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
 
     loading.value = true;
     try {
-      const result = await globalState.workerManager.sendToHashfsWorker('load', { filename });
+      const result = await globalState.workerManager.sendToWorker('load', { filename });
 
-      if (result.bytes) {
-        bytes.value = new Uint8Array(result.bytes);
-      }
-
+      if (result.bytes) bytes.value = new Uint8Array(result.bytes);
       mime.value = result.mime || 'application/octet-stream';
       dirty.value = false;
 
@@ -360,15 +338,11 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
         bytes: bytes.value.buffer.slice() // Transfer ArrayBuffer
       };
 
-      const result = await globalState.workerManager.sendToHashfsWorker('save', data);
+      const result = await globalState.workerManager.sendToWorker('save', data);
 
       if (result.success) {
         dirty.value = false;
-
-        // Update file list
-        if (result.files) {
-          globalState.files.value = result.files;
-        }
+        if (result.files) globalState.files.value = result.files;
       } else {
         throw new Error(result.error || 'Save failed');
       }
@@ -383,18 +357,13 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
     if (!newName || !globalState.auth.value) return false;
 
     try {
-      const result = await globalState.workerManager.sendToHashfsWorker('rename', {
+      const result = await globalState.workerManager.sendToWorker('rename', {
         oldName: filename,
         newName
       });
 
       if (result.success) {
-        // Update file list
-        if (result.files) {
-          globalState.files.value = result.files;
-        }
-
-        // Update internal filename reference
+        if (result.files) globalState.files.value = result.files;
         Object.defineProperty(instance, 'filename', { value: newName, writable: false });
         return true;
       }
@@ -410,14 +379,10 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
     if (!globalState.auth.value) return;
 
     try {
-      const result = await globalState.workerManager.sendToHashfsWorker('delete', { filename });
+      const result = await globalState.workerManager.sendToWorker('delete', { filename });
 
       if (result.success) {
-        // Update file list
-        if (result.files) {
-          globalState.files.value = result.files;
-        }
-
+        if (result.files) globalState.files.value = result.files;
         // Clear local state
         bytes.value = new Uint8Array();
         dirty.value = false;

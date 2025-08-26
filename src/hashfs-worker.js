@@ -1,6 +1,7 @@
 // HashFS Web Worker - Handles crypto, storage, and chain management
 import { openDB } from 'idb';
 import { cryptoUtils, compress, createChainManager } from './crypto.js';
+import { zipSync, unzipSync } from 'fflate';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -243,6 +244,108 @@ class HashFSWorker {
     return exported;
   }
 
+  // Create a zip archive (Uint8Array) of all files in the vault.
+  // Posts progress messages using operationId when provided.
+  async exportZip(operationId = null) {
+    const entries = {};
+    const items = Object.entries(this.metadata.files);
+    let completed = 0;
+
+    for (const [name, meta] of items) {
+      if (meta.activeKey) {
+        try {
+          const encrypted = await this.db.get('files', meta.activeKey);
+          const decrypted = await cryptoUtils.decrypt(encrypted, this.keys.encKey);
+          const content = await compress.inflate(decrypted);
+
+          // Add file content as Uint8Array; ZIP will preserve full path in keys
+          entries[name] = new Uint8Array(content);
+        } catch (e) {
+          console.warn(`Export ZIP failed for ${name}:`, e);
+        }
+      }
+
+      completed++;
+      if (operationId) {
+        self.postMessage({ type: 'progress', operationId, completed, total: items.length, current: name });
+      }
+    }
+
+    // Create ZIP (Uint8Array)
+    const zipped = zipSync(entries, { level: 6 });
+    return zipped; // Uint8Array
+  }
+
+  // Import a zip archive (ArrayBuffer) and return array of file entries using
+  // the standard transferable interface: [{ name, success, data: { filename, mime, bytes, size } }, ...]
+  // Posts progress messages using operationId when provided.
+  async importZip(arrayBuffer, operationId = null) {
+    const results = [];
+    try {
+      const u8 = new Uint8Array(arrayBuffer);
+      const decompressed = unzipSync(u8);
+      const entries = Object.entries(decompressed);
+      let completed = 0;
+
+      for (const [filepath, data] of entries) {
+        try {
+          const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+
+          const transferData = {
+            filename: filepath,
+            mime: 'application/octet-stream',
+            bytes: bytes.buffer,
+            size: bytes.length
+          };
+
+          results.push({ name: filepath, success: true, data: transferData });
+        } catch (err) {
+          results.push({ name: filepath, success: false, error: err.message });
+        }
+
+        completed++;
+        if (operationId) {
+          self.postMessage({ type: 'progress', operationId, completed, total: entries.length, current: filepath });
+        }
+      }
+    } catch (error) {
+      throw new Error(`ZIP import failed: ${error.message}`);
+    }
+
+    return results;
+  }
+
+  // Import regular files, each file is { name, bytes, type }
+  // Returns array of file entries using the standard transferable interface
+  async importFiles(files, operationId = null) {
+    const results = [];
+    let completed = 0;
+
+    for (const file of files) {
+      try {
+        const bytes = file.bytes instanceof ArrayBuffer ? file.bytes : new Uint8Array(file.bytes).buffer;
+
+        const transferData = {
+          filename: file.name,
+          mime: file.type || 'application/octet-stream',
+          bytes: bytes,
+          size: bytes.byteLength
+        };
+
+        results.push({ name: file.name, success: true, data: transferData });
+      } catch (err) {
+        results.push({ name: file.name, success: false, error: err.message });
+      }
+
+      completed++;
+      if (operationId) {
+        self.postMessage({ type: 'progress', operationId, completed, total: files.length, current: file.name });
+      }
+    }
+
+    return results;
+  }
+
   getFileList() {
     return Object.entries(this.metadata.files).map(([name, meta]) => ({
       name,
@@ -352,6 +455,18 @@ self.onmessage = async (e) => {
       case 'export-all':
         result = await worker.exportAll();
         break;
+      case 'export-zip':
+        // data.operationId is optional; returns a Uint8Array
+        result = await worker.exportZip(data?.operationId);
+        break;
+      case 'import-zip':
+        // data.arrayBuffer required; data.operationId optional
+        result = await worker.importZip(data.arrayBuffer, data?.operationId);
+        break;
+      case 'import-files':
+        // data.files required; data.operationId optional
+        result = await worker.importFiles(data.files, data?.operationId);
+        break;
       case 'get-files':
         result = worker.getFileList();
         break;
@@ -359,12 +474,22 @@ self.onmessage = async (e) => {
         throw new Error(`Unknown operation: ${type}`);
     }
 
-    // Send result with transferable objects when possible
+    // Determine transferable objects for the result
     const transferable = [];
-    if (result.bytes && result.bytes.buffer) {
-      transferable.push(result.bytes.buffer);
+
+    // If result is a Uint8Array (zip), transfer its buffer
+    if (result instanceof Uint8Array) {
+      transferable.push(result.buffer);
     }
 
+    // If result is an array of items with data.bytes ArrayBuffer, transfer those
+    if (Array.isArray(result)) {
+      result.forEach(item => {
+        if (item?.data?.bytes instanceof ArrayBuffer) transferable.push(item.data.bytes);
+      });
+    }
+
+    // If result is an object mapping names to file objects with content arrays, no transfer needed
     self.postMessage({ id, success: true, result }, transferable);
 
   } catch (error) {

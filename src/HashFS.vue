@@ -8,7 +8,7 @@ const props = defineProps({
 })
 
 const {
-  auth, files, stats, loading, close, importAll, exportAll, useFile
+  auth, files, stats, loading, close, importAll, exportZip, importZip, useFile, downloadVault
 } = useHashFS(props.passphrase)
 
 // UI state
@@ -18,6 +18,7 @@ const renameTarget = ref('')
 const newName = ref('')
 const dragOver = ref(false)
 const fileInput = ref(null)
+const zipInput = ref(null)
 const progressInfo = ref(null)
 
 // Current file instance
@@ -109,35 +110,63 @@ function handleProgress(progress) {
 }
 
 // File operations
+// Handle regular file imports
 async function handleImport(fileList) {
   if (!fileList?.length) return
 
   try {
     progressInfo.value = { completed: 0, total: fileList.length, current: '' }
-
     const results = await importAll(Array.from(fileList), handleProgress)
-    const failed = results.filter(r => !r.success)
-    const succeeded = results.filter(r => r.success)
-
-    if (succeeded.length > 0) {
-      console.log(`Successfully imported: ${succeeded.map(s => s.name).join(', ')}`)
-      if (succeeded.length === 1) {
-        selectedFile.value = succeeded[0].name
-      }
-    }
-
-    if (failed.length > 0) {
-      const errorDetails = failed.map(f => `${f.name}: ${f.error}`).join('\n')
-      console.error('Import failures:', errorDetails)
-      alert(`Import failed:\n${errorDetails}`)
-    }
-
-    if (fileInput.value) fileInput.value.value = ''
+    handleImportResults(results)
   } catch (error) {
     console.error('Import error:', error)
     alert(`Import failed: ${error.message}`)
   } finally {
     progressInfo.value = null
+    if (fileInput.value) fileInput.value.value = ''
+  }
+}
+
+// Handle ZIP vault imports
+async function handleImportZip(fileList) {
+  if (!fileList?.length) return
+  const zipFile = fileList[0]
+  if (!zipFile.name.endsWith('.zip')) {
+    alert('Please select a ZIP file')
+    return
+  }
+
+  try {
+    progressInfo.value = { completed: 0, total: 1, current: zipFile.name }
+    const arrayBuffer = await zipFile.arrayBuffer()
+    const results = await importZip(arrayBuffer, handleProgress)
+    handleImportResults(results)
+  } catch (error) {
+    console.error('ZIP import error:', error)
+    alert(`ZIP import failed: ${error.message}`)
+  } finally {
+    progressInfo.value = null
+    if (zipInput.value) zipInput.value.value = ''
+  }
+}
+
+// Handle import results for both regular and ZIP imports
+function handleImportResults(results) {
+  const failed = results.filter(r => !r.success)
+  const succeeded = results.filter(r => r.success)
+
+  if (succeeded.length > 0) {
+    console.log(`Successfully imported: ${succeeded.map(s => s.name).join(', ')}`)
+    if (succeeded.length === 1) {
+      selectedFile.value = succeeded[0].name
+    }
+  }
+
+  if (failed.length > 0) {
+    const errorDetails = failed.map(f => `${f.name}: ${f.error}`).join(' ')
+    console.error('Import failures:', errorDetails)
+    alert(`Import failed:
+${errorDetails}`)
   }
 }
 
@@ -213,32 +242,10 @@ async function confirmDelete(fileName) {
   }
 }
 
-async function handleExportAll() {
+async function handleExportZip() {
   try {
     progressInfo.value = { completed: 0, total: files.value.length, current: '' }
-
-    const exported = await exportAll(handleProgress)
-
-    // Convert to download format
-    const downloadData = {}
-    for (const [name, data] of Object.entries(exported)) {
-      const bytes = new Uint8Array(data.bytes)
-
-      downloadData[name] = {
-        mime: data.mime,
-        content: Array.from(bytes)
-      }
-    }
-
-    const blob = new Blob([JSON.stringify(downloadData, null, 2)], {
-      type: 'application/json'
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `vault-export-${Date.now()}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    await downloadVault(`vault-${Date.now()}.zip`, handleProgress)
   } catch (error) {
     alert(`Export failed: ${error.message}`)
   } finally {
@@ -259,7 +266,14 @@ function handleDragLeave() {
 async function handleDrop(e) {
   e.preventDefault()
   dragOver.value = false
-  await handleImport(e.dataTransfer.files)
+  const files = e.dataTransfer.files
+
+  // If single ZIP file, use ZIP import
+  if (files.length === 1 && files[0].name.endsWith('.zip')) {
+    await handleImportZip(files)
+  } else {
+    await handleImport(files)
+  }
 }
 
 // Keyboard shortcuts
@@ -320,8 +334,9 @@ onBeforeUnmount(async () => {
 
       label.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.cursor-pointer.text-sm.font-medium(
         :class="{ 'opacity-50 cursor-not-allowed': loading }"
+        title="Import files"
       )
-        | 📥 Import
+        | 📥 Import Files
         input.hidden(
           ref="fileInput"
           type="file"
@@ -330,12 +345,25 @@ onBeforeUnmount(async () => {
           @change="handleImport($event.target.files)"
         )
 
+      label.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.cursor-pointer.text-sm.font-medium(
+        :class="{ 'opacity-50 cursor-not-allowed': loading }"
+        title="Import vault from ZIP"
+      )
+        | 📦 Import ZIP
+        input.hidden(
+          ref="zipInput"
+          type="file"
+          accept=".zip"
+          :disabled="loading"
+          @change="handleImportZip($event.target.files)"
+        )
+
       button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.text-sm.font-medium(
         v-if="hasFiles"
-        @click="handleExportAll"
+        @click="handleExportZip"
         :disabled="loading"
-        title="Export all files"
-      ) 📦 Export All
+        title="Download vault as ZIP"
+      ) 📦 Download ZIP
 
   //- Progress Bar
   .mb-4(v-if="progressInfo")
