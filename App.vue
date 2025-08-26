@@ -57,8 +57,12 @@ watch(passphrase, (val) => {
         auth,
         files,
         stats,
+        loading,
+        close,
         importAll,
-        exportAll,
+        exportZip,
+        importZip,
+        downloadVault,
         useFile
       } = useHashFS("your-secure-passphrase")
 

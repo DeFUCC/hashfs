@@ -81,7 +81,7 @@ function formatSize(bytes) {
 function isTextMime(mime) {
   if (!mime) return true
   return /^text\//.test(mime) ||
-    /(json|xml|svg|turtle|trig|sparql|sql|csv|yaml|yml|md|markdown|javascript|typescript)/i.test(mime)
+    /(json|js|vue|xml|svg|turtle|trig|sparql|sql|csv|yaml|yml|md|markdown|javascript|typescript)/i.test(mime)
 }
 
 function formatDate(ts) {
@@ -203,8 +203,7 @@ async function confirmRename() {
   }
 
   try {
-    const fileInstance = useFile(renameTarget.value)
-    const success = await fileInstance.rename(newName.value)
+    const success = await useFile(renameTarget.value).rename(newName.value)
 
     if (!success) {
       alert('Rename failed - file may already exist')
@@ -231,8 +230,7 @@ async function confirmDelete(fileName) {
   if (!confirm(`Delete "${fileName}" permanently?`)) return
 
   try {
-    const fileInstance = useFile(fileName)
-    await fileInstance.delete()
+    await useFile(fileName).delete()
 
     if (selectedFile.value === fileName) {
       selectedFile.value = ''

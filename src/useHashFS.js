@@ -151,10 +151,8 @@ export function useHashFS(passphrase, options = {}) {
     } finally {
       if (onProgress) globalState.progressHandlers.delete(operationId);
     }
-  }  // Export all files
-  async function exportAll(onProgress = null) {
-    return exportZip(onProgress); // Use ZIP export by default now
   }
+
 
   // Export entire vault as a ZIP (returns Uint8Array)
   async function exportZip(onProgress = null) {
@@ -252,7 +250,6 @@ export function useHashFS(passphrase, options = {}) {
     loading,
     close,
     importAll,
-    exportAll,
     exportZip,
     importZip,
     downloadVault,

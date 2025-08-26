@@ -221,28 +221,6 @@ class HashFSWorker {
     }
   }
 
-  async exportAll() {
-    const exported = {};
-
-    for (const [name, meta] of Object.entries(this.metadata.files)) {
-      if (meta.activeKey) {
-        try {
-          const encrypted = await this.db.get('files', meta.activeKey);
-          const decrypted = await cryptoUtils.decrypt(encrypted, this.keys.encKey);
-          const content = await compress.inflate(decrypted);
-
-          exported[name] = {
-            mime: meta.mime,
-            content: Array.from(content)
-          };
-        } catch (e) {
-          console.warn(`Export failed for ${name}:`, e);
-        }
-      }
-    }
-
-    return exported;
-  }
 
   // Create a zip archive (Uint8Array) of all files in the vault.
   // Posts progress messages using operationId when provided.
@@ -451,9 +429,6 @@ self.onmessage = async (e) => {
         break;
       case 'rename':
         result = await worker.renameFile(data.oldName, data.newName);
-        break;
-      case 'export-all':
-        result = await worker.exportAll();
         break;
       case 'export-zip':
         // data.operationId is optional; returns a Uint8Array
