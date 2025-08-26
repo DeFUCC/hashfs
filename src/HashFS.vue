@@ -448,29 +448,26 @@ onBeforeUnmount(async () => {
     .bg-white.rounded-lg.border.border-stone-200.flex.flex-col
       //- Editor Header
       .flex.items-center.justify-between.border-b.border-stone-200.p-4(v-if="currentFile")
-        .flex.items-center.gap-2
-          h3.text-lg.font-medium.text-stone-800.m-0 {{ currentFile.filename }}
-          span.text-sm.text-stone-500.bg-stone-100.rounded.px-2 {{ currentFile.mime.value }}
-        .flex.items-center.gap-2
+        .flex.items-center.gap-2.w-full
           //- Version info
           .text-sm.text-stone-600.px-2(v-if="availableVersions.max > 0")
             | v.{{ currentVersion }} 
-            //- span.text-stone-400 ({{ availableVersions.min }}-{{ availableVersions.max }})
-
+            span.text-stone-400 ({{ availableVersions.min }}-{{ availableVersions.max }} available)
+          .flex-auto
           //- Undo/Redo buttons  
           button.px-2.py-1.rounded.bg-stone-100.text-stone-700.hover-bg-stone-200.transition.disabled-opacity-50.disabled-cursor-not-allowed(
             :disabled="!canUndo"
             title="Undo (Ctrl+Z)"
             @click="currentFile.undo()"
           ) ↩ Undo 
-            span(v-if="Math.max(0, currentVersion - (availableVersions.min || 0))") {{ Math.max(0, currentVersion - (availableVersions.min || 0)) }}
+            span(v-if="canUndo") {{ Math.max(0, currentVersion - (availableVersions.min || 0)) }}
 
           button.px-2.py-1.rounded.bg-stone-100.text-stone-700.hover-bg-stone-200.transition.disabled-opacity-50.disabled-cursor-not-allowed(
             :disabled="!canRedo"
             title="Redo (Ctrl+Shift+Z)"
             @click="currentFile.redo()"
           ) ↪ Redo 
-            span(v-if="Math.max(0, (availableVersions.max || 0) - currentVersion)") {{ Math.max(0, (availableVersions.max || 0) - currentVersion) }}
+            span(v-if="canRedo") {{ Math.max(0, (availableVersions.max || 0) - currentVersion) }}
       .px-6.py-4.border-b.border-stone-200.bg-stone-50(v-if="currentFile")
         .flex.items-center.justify-between
           .min-w-0.flex-1
