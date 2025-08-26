@@ -293,7 +293,7 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
   let saveTimer = null;
   const scheduleAutoSave = () => {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => save(), fileOptions.autoSaveDelay || 800);
+    saveTimer = setTimeout(() => save(), fileOptions.autoSaveDelay || 1800);
   };
 
   // Reactive text content
