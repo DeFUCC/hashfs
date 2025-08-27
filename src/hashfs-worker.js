@@ -24,7 +24,10 @@ class HashFSWorker {
         }
       });
 
-      this.chainManager = createChainManager(this.db, this.keys.encKey);
+      this.chainManager = createChainManager(this.db, this.keys.encKey, undefined, {
+        sign: (hash) => this.keys.sign(hash),
+        verify: (hash, sig) => this.keys.verify(hash, sig)
+      });
 
       // Load metadata
       try {
@@ -84,6 +87,7 @@ class HashFSWorker {
       const inflated = await compress.inflate(decrypted);
 
       // Verify integrity
+      // Use BLAKE3 for hash verification
       const hash = cryptoUtils.hash(inflated);
       if (hash !== targetVersion.hash || !this.keys.verify(hash, targetVersion.sig)) {
         throw new Error('Integrity verification failed');

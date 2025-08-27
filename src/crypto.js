@@ -3,8 +3,11 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
 import { sha256 } from '@noble/hashes/sha256.js';
 import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
+import { scrypt, scryptAsync } from '@noble/hashes/scrypt.js';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { gcm } from '@noble/ciphers/aes.js';
+import { blake3 } from '@noble/hashes/blake3';
+import { hkdf } from '@noble/hashes/hkdf';
 
 export const encoder = new TextEncoder();
 export const decoder = new TextDecoder();
@@ -15,14 +18,21 @@ export const cryptoUtils = {
     const pwdBytes = encoder.encode(String(pwd || '').normalize('NFC').trim());
     if (pwdBytes.length < 8) throw new Error('Password too short');
 
-    const salt = encoder.encode('hashfs-v5-2025');
-    const masterKey = pbkdf2(sha256, pwdBytes, salt, { c: 120000, dkLen: 64 });
+    const salt = encoder.encode('hashfs-v6-2025');
 
-    const sigKey = masterKey.slice(0, 32);
-    const encKey = masterKey.slice(32, 64);
+    const N = 1 << 17; // work factor (use 2^17 by default)
+    const r = 8;
+    const p = 1;
+    const dkLen = 32;
+
+    const maxmem = N * r * p * 128 + (128 * r * p);
+    const masterKey = scrypt(pwdBytes, salt, { N, r, p, dkLen, maxmem });
+
+    const sigKey = hkdf(sha256, masterKey, salt, encoder.encode('signing'), 32);
+    const encKey = hkdf(sha256, masterKey, salt, encoder.encode('encryption'), 32);
     const pubKey = ed25519.getPublicKey(sigKey);
 
-    const dbName = bytesToHex(sha256(pubKey).slice(0, 16)) + '-hashfs-v5';
+    const dbName = bytesToHex(blake3(pubKey).slice(0, 16)) + '-hashfs-v6';
 
     return {
       sigKey, pubKey, encKey, dbName,
@@ -34,7 +44,7 @@ export const cryptoUtils = {
     };
   },
 
-  hash: (bytes) => bytesToHex(sha256(bytes)),
+  hash: (bytes) => bytesToHex(blake3(bytes)),
   generateKey: () => 'sk_' + bytesToHex(randomBytes(12)),
   generateChainId: () => bytesToHex(randomBytes(16)).replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5'),
 
@@ -64,8 +74,11 @@ compress.zip = (entries, opts) => zipSync(entries, opts);
 compress.unzip = (u8) => unzipSync(u8);
 
 // Chain management with improved caching
-export function createChainManager(db, encKey, maxCache = 20) {
+export function createChainManager(db, encKey, maxCache = 20, { sign, verify } = {}) {
   const cache = new Map();
+  // Expect sign and verify functions (from derived keys)
+  const signer = sign;
+  const verifier = verify;
 
   async function getChain(chainId) {
     if (cache.has(chainId)) {
@@ -76,11 +89,19 @@ export function createChainManager(db, encKey, maxCache = 20) {
     }
 
     try {
-      const encrypted = await db.get('chains', chainId);
-      if (!encrypted) return { versions: [], pruned: { count: 0, oldestKept: 0 } };
+      const stored = await db.get('chains', chainId);
+      if (!stored) return { versions: [], pruned: { count: 0, oldestKept: 0 } };
 
-      const decrypted = await cryptoUtils.decrypt(encrypted, encKey);
-      const chain = JSON.parse(decoder.decode(decrypted));
+      // Decrypt the stored chain data and decompress
+      const decrypted = await cryptoUtils.decrypt(stored, encKey);
+      const inflated = await compress.inflate(decrypted);
+
+      // Verify chain signature (signature is required)
+      if (!stored.sig) throw new Error('Missing chain signature');
+      const hash = cryptoUtils.hash(decrypted); // signature is over compressed bytes
+      if (!verifier || !verifier(hash, stored.sig)) throw new Error('Chain signature verification failed');
+
+      const chain = JSON.parse(decoder.decode(inflated));
 
       if (cache.size >= maxCache) {
         const oldest = cache.keys().next().value;
@@ -96,8 +117,20 @@ export function createChainManager(db, encKey, maxCache = 20) {
   }
 
   async function saveChain(chainId, chain) {
+    // Serialize and compress the chain data
     const bytes = encoder.encode(JSON.stringify(chain));
-    const encrypted = await cryptoUtils.encrypt(bytes, encKey);
+    const compressed = await compress.deflate(bytes);
+
+    // Sign the compressed data (signature over compressed bytes)
+    const hash = cryptoUtils.hash(compressed);
+    if (!signer) throw new Error('No signer available for chain signing');
+    const sig = signer(hash);
+
+    // Encrypt the compressed data
+    const encrypted = await cryptoUtils.encrypt(compressed, encKey);
+    // Attach signature so it survives in storage alongside iv/data
+    encrypted.sig = sig;
+
     await db.put('chains', encrypted, chainId);
 
     if (cache.size >= maxCache) {
