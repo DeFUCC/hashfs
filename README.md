@@ -4,7 +4,7 @@
 
 [hashfs.js.org](https://hashfs.js.org/)
 
-HashFS is a production-ready Vue 3 composable that provides military-grade encrypted file storage directly in your browser. It combines content-addressable storage, Ed25519 signatures, and cryptographic hash chains to create a zero-trust file vault with complete privacy - no servers, no tracking, no data leaks.
+HashFS is a production-ready Vue 3 composable that provides industry-standard encrypted file storage directly in the browser. It combines content-addressable storage, Ed25519 signatures, and cryptographic hash chains to create a zero-trust file vault with complete privacy - no servers, no tracking, no data leaks.
 
 ## ✨ Core Features
 
@@ -12,7 +12,7 @@ HashFS is a production-ready Vue 3 composable that provides military-grade encry
 - 🔗 **Hash chain integrity** - Cryptographic verification of entire file history
 - 🖋️ **Ed25519 signatures** - Tamper-proof authenticity for every version
 - 📦 **Content addressing** - SHA-256 deduplication with automatic compression
-- ⏱️ **Version control** - Immutable history with configurable retention
+- ⏱️ **Version control** - Immutable history with configurable retention and undo/redo
 - ⚡ **Offline-first** - Works completely offline using IndexedDB
 - 🎨 **Vue 3 reactive** - Seamless two-way binding with auto-save
 - 🛡️ **Zero dependencies** - Self-contained security, no external services
@@ -234,7 +234,7 @@ Each entry in `vault.files` contains:
 
 ### Cryptographic Assurance
 
-- **AES-256-GCM** - Military-grade authenticated encryption
+- **AES-256-GCM** - Industry-standard authenticated encryption
 - **Ed25519** - State-of-the-art elliptic curve signatures
 - **SHA-256** - Collision-resistant content addressing
 - **PBKDF2** - 120,000 iterations against rainbow tables
@@ -325,7 +325,7 @@ pnpm run build
 
 ## 📄 License
 
-Contact the author for licencing details.
+This project is licensed under the MIT License.
 
 ## 🙏 Acknowledgments
 

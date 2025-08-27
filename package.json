@@ -1,6 +1,6 @@
 {
 	"name": "hashfs",
-	"version": "0.2.2",
+	"version": "0.2.3",
 	"description": "Content-addressed secure file storage in a browser tab",
 	"type": "module",
 	"homepage": "https://hashfs.js.org/",
@@ -9,6 +9,7 @@
 		"url": "https://github.com/DeFUCC/hashfs"
 	},
 	"author": "davay42 <davay@defucc.me>",
+	"license": "MIT",
 	"packageManager": "pnpm@10.15.0",
 	"engines": {
 		"node": "22"
