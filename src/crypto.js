@@ -3,7 +3,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
 import { sha256 } from '@noble/hashes/sha256.js';
 import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
-import { scrypt, scryptAsync } from '@noble/hashes/scrypt.js';
+import { scrypt } from '@noble/hashes/scrypt.js';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { gcm } from '@noble/ciphers/aes.js';
 import { blake3 } from '@noble/hashes/blake3';

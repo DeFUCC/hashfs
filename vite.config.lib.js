@@ -2,7 +2,6 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import Unocss from 'unocss/vite'
 import { viteSingleFile } from "vite-plugin-singlefile"
-import { presetWind3, presetIcons, presetTypography, transformerDirectives, extractorSplit } from "unocss";
 import extractorPug from '@unocss/extractor-pug'
 
 import path from "path";

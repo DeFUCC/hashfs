@@ -38,7 +38,7 @@ watch(passphrase, (val) => {
     input.bg-light-100.p-4.rounded-lg.text-center(v-model="inp" type="password")
     button.text-xl.p-4.shadow-lg.rounded-lg.bg-green-400(type="submit") Enter
 
-    .text-sm.op-80 HashFS is a production-ready reactive Vue composable package that provide secure file persistence in the browser. It combines content-addressable storage, Ed25519 signatures, and cryptographic hash chains to create zero-trust file vaults with complete privacy - no servers, no tracking, no data leaks.
+    .text-sm.op-80 HashFS is a production-ready reactive Vue composable package that provides secure file persistence in the browser. It combines content-addressable storage, Ed25519 signatures, and cryptographic hash chains to create zero-trust file vaults with complete privacy - offline, no servers, no tracking, no data leaks.
 
     .flex.items-center.w-full.text-center.gap-4.justify-center
       a.flex.items-center.gap-2.bg-stone-700.p-4.rounded-xl.shadow-lg.text-stone-100(href="https://www.npmjs.com/package/hashfs" target="_blank") 
