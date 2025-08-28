@@ -78,7 +78,8 @@ function addServiceWorkerScript() {
 		name: 'vite-plugin-mini-sw',
 		transformIndexHtml(html) {
 			if (process.env.NODE_ENV === 'production') {
-				return html.replace('</head>', `          
+				return html.replace('</head>', ` 
+	<script async defer src="https://stat.defucc.me/script.js" data-website-id="63b17761-f002-40ad-812b-a7faafed765c"></script>
 	<script>
     'serviceWorker' in navigator && window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js')});
   </script>
