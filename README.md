@@ -17,6 +17,48 @@ HashFS is a production-ready Vue 3 composable that provides industry-standard en
 - 🎨 **Vue 3 reactive** - Seamless two-way binding with auto-save
 - 🛡️ **Zero dependencies** - Self-contained security, no external services
 
+## Working example
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>#FS test</title>
+  <script type="importmap"> { "imports": { "vue": "https://esm.sh/vue" } } </script>
+</head>
+
+<body>
+  <div id="app" style="display:flex; flex-direction: column; gap: 1em;">
+    <input type="text" id="input" style="width:80svw;">
+    <textarea style="width:80svw;height:80svh" id="text" disabled></textarea>
+  </div>
+  <script type="module">
+    import { ref, watch } from 'vue'
+    import { useHashFS, useFile } from './lib/index.js'
+
+    const md = useFile('readme.md', '## Initial content')
+
+    const input = document.getElementById('input')
+
+    input.addEventListener('change', e => { const fs = useHashFS(e?.target?.value) })
+
+    const textarea = document.getElementById('text')
+
+    watch(md.loading, l => { if (!l) { textarea.disabled = false } }, { immediate: true })
+
+    watch(md.text, t => { textarea.innerText = t }, { immediate: true })
+
+    textarea.addEventListener('change', e => { md.text.value = e?.target?.value; md.save() })
+
+  </script>
+</body>
+
+</html>
+```
+
 ## 🔐 Security Architecture
 
 ### Cryptographic Hash Chains
@@ -71,25 +113,25 @@ This allows you to directly work with a file as a reactive resource, while still
 
 ```vue
 <script setup>
-	import { ref } from "vue";
-	import { useHashFS } from "hashfs";
+  import { ref } from "vue";
+  import { useHashFS } from "hashfs";
 
-	const passphrase = ref("correct horse battery staple");
+  const passphrase = ref("correct horse battery staple");
 
-	// Unlock the vault
-	const vault = useHashFS(passphrase.value);
+  // Unlock the vault
+  const vault = useHashFS(passphrase.value);
 
-	// Create or open a text file
-	const notes = vault.useFile(vault, "notes.txt", "text/plain");
+  // Create or open a text file
+  const notes = vault.useFile(vault, "notes.txt", "text/plain");
 
-	// Reactive text content
-	notes.text.value = "Hello, secure world!";
+  // Reactive text content
+  notes.text.value = "Hello, secure world!";
 
-	// Persist change
-	await notes.save();
+  // Persist change
+  await notes.save();
 
-	// Later, read it back
-	console.log(notes.text.value); // "Hello, secure world!"
+  // Later, read it back
+  console.log(notes.text.value); // "Hello, secure world!"
 </script>
 ```
 
@@ -99,35 +141,35 @@ This allows you to directly work with a file as a reactive resource, while still
 
 ```vue
 <script setup>
-	import { ref } from "vue";
-	import { useHashFS } from "hashfs";
+  import { ref } from "vue";
+  import { useHashFS } from "hashfs";
 
-	const passphrase = ref("my-photo-vault");
+  const passphrase = ref("my-photo-vault");
 
-	// Unlock vault
-	const vault = useHashFS(passphrase.value);
+  // Unlock vault
+  const vault = useHashFS(passphrase.value);
 
-	// Work with an image file
-	const avatar = vault.useFile("avatar.png");
+  // Work with an image file
+  const avatar = vault.useFile("avatar.png");
 
-	// Import from an `<input type="file">`
-	const handleFile = async (event) => {
-		const file = event.target.files[0];
-		await avatar.import(file); // Encrypted & stored
-	};
+  // Import from an `<input type="file">`
+  const handleFile = async (event) => {
+  const file = event.target.files[0];
+  await avatar.import(file); // Encrypted & stored
+  };
 
-	// Export and display as object URL
-	const showImage = async () => {
-		const blob = await avatar.export();
-		const url = URL.createObjectURL(blob);
-		document.querySelector("#preview").src = url;
-	};
+  // Export and display as object URL
+  const showImage = async () => {
+  const blob = await avatar.export();
+  const url = URL.createObjectURL(blob);
+  document.querySelector("#preview").src = url;
+  };
 </script>
 
 <template>
-	<input type="file" accept="image/*" @change="handleFile" />
-	<button @click="showImage">Show Stored Image</button>
-	<img id="preview" />
+  <input type="file" accept="image/*" @change="handleFile" />
+  <button @click="showImage">Show Stored Image</button>
+  <img id="preview" />
 </template>
 ```
 

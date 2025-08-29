@@ -1,5 +1,5 @@
 // Vue 3 Composable - HashFS with Web Workers
-import { ref, computed, onBeforeUnmount } from 'vue';
+import { ref, computed, onBeforeUnmount, watch } from 'vue';
 import HashFSWorker from './hashfs-worker.js?worker&inline'
 
 const encoder = new TextEncoder();
@@ -10,21 +10,62 @@ let hashfsWorker = null;
 let requestId = 0;
 const pendingRequests = new Map();
 
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+// WorkerManager lazily initializes the worker and retries on transient failures.
 class WorkerManager {
   constructor() {
-    this.initWorker();
+    // Do not initialize worker at import time (SSG-safe). Worker will be
+    // created on first use via initWorker().
+    this.worker = null;
+    this.readyPromise = null;
+    // Track vault and session identifiers without storing sensitive data
+    this.vaultHash = null;     // Consistent for same vault
+    this.sessionHash = null;   // Unique per session with entropy
   }
 
-  initWorker() {
-    if (!hashfsWorker) {
-      hashfsWorker = new HashFSWorker();
-      hashfsWorker.onmessage = this.handleMessage.bind(this);
-      hashfsWorker.onerror = error => console.error('Worker error:', error);
-    }
+  async initWorker(retries = 3) {
+    if (this.worker) return;
+    if (this.readyPromise) return this.readyPromise;
+
+    this.readyPromise = (async () => {
+      if (typeof window === 'undefined' || typeof HashFSWorker === 'undefined') {
+        throw new Error('Worker not available in this environment');
+      }
+
+      let attempt = 0;
+      while (attempt < retries) {
+        try {
+          this.worker = new HashFSWorker();
+          hashfsWorker = this.worker; // keep module-level ref for legacy code paths
+          this.worker.onmessage = this.handleMessage.bind(this);
+          this.worker.onerror = error => console.error('Worker error:', error);
+          return;
+        } catch (err) {
+          attempt += 1;
+          const backoff = 100 * Math.pow(2, attempt);
+          await sleep(backoff);
+        }
+      }
+
+      // If we reach here, initialization failed
+      this.readyPromise = null;
+      throw new Error('Failed to initialize HashFS worker');
+    })();
+
+    return this.readyPromise;
   }
 
   handleMessage(e) {
     const { id, success, result, error, type, operationId } = e.data;
+
+    // Track vault identity and session security without storing sensitive data
+    if (type === 'init' && success && result.messageHash) {
+      this.vaultHash = result.messageHash.base;       // Consistent for same vault
+      this.sessionHash = result.messageHash.session;  // Unique per-session
+    }
 
     // Handle progress updates
     if (type === 'progress' && operationId) {
@@ -43,8 +84,9 @@ class WorkerManager {
   }
 
   async sendToWorker(type, data = {}, operationId = null) {
-    const id = ++requestId;
+    await this.initWorker();
 
+    const id = ++requestId;
     return new Promise((resolve, reject) => {
       pendingRequests.set(id, { resolve, reject });
 
@@ -53,23 +95,48 @@ class WorkerManager {
       if (data.bytes instanceof ArrayBuffer) transferable.push(data.bytes);
       if (data.arrayBuffer instanceof ArrayBuffer) transferable.push(data.arrayBuffer);
 
-      hashfsWorker.postMessage({ id, type, data, operationId }, transferable);
+      try {
+        this.worker.postMessage({ id, type, data, operationId }, transferable);
+      } catch (err) {
+        pendingRequests.delete(id);
+        reject(err);
+      }
     });
+  }
+
+  terminate() {
+    if (this.worker) {
+      try { this.worker.terminate(); } catch (e) { /* ignore */ }
+      this.worker = null;
+      hashfsWorker = null;
+    }
+    this.readyPromise = null;
+    this.vaultHash = null;
+    this.sessionHash = null;
   }
 }
 
-// Global state
+// Global state (workerManager is created lazily to be SSG-safe)
 const globalState = {
   auth: ref(false),
   files: ref([]),
   fileBuffers: new Map(),
   progressHandlers: new Map(),
-  workerManager: new WorkerManager()
+  workerManager: null
 };
+
+function getWorkerManager() {
+  if (!globalState.workerManager) globalState.workerManager = new WorkerManager();
+  return globalState.workerManager;
+}
+
+// Shared file instance cache so `useHashFS().useFile()` and `useFile()` return
+// the same reactive instance for a given filename.
+const globalFileInstances = new Map();
 
 export function useHashFS(passphrase, options = {}) {
   const loading = ref(false);
-  const fileInstances = new Map();
+  const fileInstances = globalFileInstances;
 
   // Computed stats
   const stats = computed(() => {
@@ -88,11 +155,39 @@ export function useHashFS(passphrase, options = {}) {
 
   // Initialize
   async function init() {
-    if (globalState.auth.value || !String(passphrase || '').trim()) return;
+    if (!String(passphrase || '').trim()) return;
 
     loading.value = true;
     try {
-      const result = await globalState.workerManager.sendToWorker('init', { passphrase });
+      const wm = getWorkerManager();
+
+      // If already logged in, check if this is a different passphrase
+      if (globalState.auth.value) {
+        // Try init with new passphrase - if messageHash changes, it's a different vault
+        const result = await wm.sendToWorker('init', { passphrase });
+        if (!result.success) {
+          throw new Error(result.error || 'Authentication failed');
+        }
+
+        if (result.messageHash.base === wm.vaultHash) {
+          // Same vault, update session hash and continue
+          wm.sessionHash = result.messageHash.session;
+          loading.value = false;
+          return;
+        }
+
+        // Different vault detected - reset state securely
+        wm.terminate();
+        globalState.auth.value = false;
+        globalState.files.value = [];
+        globalState.fileBuffers.clear();
+        globalState.progressHandlers.clear();
+        globalState.workerManager = null;
+      }
+
+      // Fresh init with new worker
+      const wm2 = getWorkerManager();
+      const result = await wm2.sendToWorker('init', { passphrase });
 
       if (result.success) {
         globalState.auth.value = true;
@@ -125,14 +220,14 @@ export function useHashFS(passphrase, options = {}) {
       }
 
       // Process all files in the worker
-      const items = await globalState.workerManager.sendToWorker('import-files', { files: filesData }, operationId);
+      const items = await getWorkerManager().sendToWorker('import-files', { files: filesData }, operationId);
 
       // Save all files and track results
       const saveResults = [];
       for (const item of items) {
         if (item.success) {
           try {
-            const res = await globalState.workerManager.sendToWorker('save', item.data);
+            const res = await getWorkerManager().sendToWorker('save', item.data);
             if (res.success) {
               saveResults.push({ name: item.name, success: true });
               if (res.files) globalState.files.value = res.files;
@@ -163,7 +258,7 @@ export function useHashFS(passphrase, options = {}) {
     }
 
     try {
-      const zipped = await globalState.workerManager.sendToWorker('export-zip', { operationId });
+      const zipped = await getWorkerManager().sendToWorker('export-zip', { operationId });
       // zipped is a Uint8Array (transfered)
       return zipped;
     } finally {
@@ -181,13 +276,13 @@ export function useHashFS(passphrase, options = {}) {
 
     try {
       // Send zip to worker; worker will return an array of items with transferable bytes
-      const items = await globalState.workerManager.sendToWorker('import-zip', { arrayBuffer, operationId });
+      const items = await getWorkerManager().sendToWorker('import-zip', { arrayBuffer, operationId });
 
       const saveResults = [];
       for (const item of items) {
         if (item.success) {
           try {
-            const res = await globalState.workerManager.sendToWorker('save', item.data);
+            const res = await getWorkerManager().sendToWorker('save', item.data);
             if (res.success) {
               saveResults.push({ name: item.name, success: true });
               if (res.files) globalState.files.value = res.files;
@@ -208,21 +303,25 @@ export function useHashFS(passphrase, options = {}) {
     }
   }
 
-  // Initialize on first call
-  init();
+  // Do not auto-init here; let consumer call init. However, if a passphrase was
+  // provided, attempt a best-effort init but do not throw if environment isn't ready.
+  if (String(passphrase || '').trim()) {
+    // Best-effort background init (no-throw)
+    (async () => {
+      try { await init(); } catch (e) { /* ignore */ }
+    })();
+  }
 
   function close() {
-
-    hashfsWorker?.terminate()
-    hashfsWorker = null;
+    getWorkerManager()?.terminate?.();
 
     Object.assign(globalState, {
       auth: ref(false),
       files: ref([]),
       fileBuffers: new Map(),
       progressHandlers: new Map(),
-      workerManager: new WorkerManager()
-    })
+      workerManager: null
+    });
   }
 
   // UI helper to safely trigger zip download with progress
@@ -263,11 +362,19 @@ export function useHashFS(passphrase, options = {}) {
   };
 }
 
+// Export a standalone useFile composable that uses the same global state.
+export function useFile(filename, initialContent = '', fileOptions = {}) {
+  if (globalFileInstances.has(filename)) return globalFileInstances.get(filename);
+  const inst = createFileInstance(filename, initialContent, fileOptions);
+  globalFileInstances.set(filename, inst);
+  return inst;
+}
+
 // File instance factory
 function createFileInstance(filename, initialContent = '', fileOptions = {}) {
   if (!filename) throw new Error('Filename is required');
 
-  const loading = ref(false);
+  const loading = ref(true);
   const bytes = ref(new Uint8Array());
   const mime = ref('text/plain');
   const dirty = ref(false);
@@ -305,22 +412,37 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
   });
 
   async function load(version = null) {
-    if (!globalState.auth.value) throw new Error('Not authenticated');
-
-    // Handle initial content for new files
-    if (initialContent) {
-      if (typeof initialContent === 'string') {
-        bytes.value = encoder.encode(initialContent);
-        mime.value = fileOptions.mime || 'text/plain';
-      } else {
-        dirty.value = true;
+    // If we are not authenticated yet, respect initialContent and optionally
+    // attempt a best-effort init if a passphrase was provided in fileOptions.
+    if (!globalState.auth.value) {
+      if (initialContent) {
+        if (typeof initialContent === 'string') {
+          bytes.value = encoder.encode(initialContent);
+          mime.value = fileOptions.mime || 'text/plain';
+        } else {
+          dirty.value = true;
+        }
+        return;
       }
-      return;
+
+      // Try to auto-init with provided passphrase, otherwise wait for explicit init
+      if (fileOptions.passphrase) {
+        try {
+          await getWorkerManager().sendToWorker('init', { passphrase: fileOptions.passphrase });
+          // If init succeeded the global auth will be updated by the caller of init()
+        } catch (e) {
+          // ignore init failures here; caller can init later
+        }
+      }
+
+      // Still not authenticated -> defer load
+      if (!globalState.auth.value) return;
     }
 
+    // Authenticated: perform load
     loading.value = true;
     try {
-      const result = await globalState.workerManager.sendToWorker('load', { filename, version });
+      const result = await getWorkerManager().sendToWorker('load', { filename, version });
 
       if (result.bytes) {
         bytes.value = new Uint8Array(result.bytes);
@@ -356,7 +478,7 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
         bytes: bytes.value.buffer.slice() // Transfer ArrayBuffer
       };
 
-      const result = await globalState.workerManager.sendToWorker('save', data);
+      const result = await getWorkerManager().sendToWorker('save', data);
 
       if (result.success) {
         dirty.value = false;
@@ -384,7 +506,7 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
     if (!newName || !globalState.auth.value) return false;
 
     try {
-      const result = await globalState.workerManager.sendToWorker('rename', {
+      const result = await getWorkerManager().sendToWorker('rename', {
         oldName: filename,
         newName
       });
@@ -406,7 +528,7 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
     if (!globalState.auth.value) return;
 
     try {
-      const result = await globalState.workerManager.sendToWorker('delete', { filename });
+      const result = await getWorkerManager().sendToWorker('delete', { filename });
 
       if (result.success) {
         if (result.files) globalState.files.value = result.files;
@@ -478,14 +600,38 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
 
   // Auto-load on creation
   load().catch(console.warn);
-
-  // Cleanup
+  // Cleanup function for timers
   const cleanup = () => {
     clearTimeout(saveTimer);
   };
 
+  // Watch auth changes to handle login/logout/relogin securely
+  const stopWatch = watch(globalState.auth, (val) => {
+    if (val) {
+      // On login/relogin: attempt to load content from new vault
+      load().catch(() => { });
+    } else {
+      // On logout or vault change: clear sensitive content
+      bytes.value = new Uint8Array();
+      mime.value = 'text/plain';
+      dirty.value = false;
+      currentVersion.value = 0;
+      availableVersions.value = { min: 0, max: 0 };
+      // If initialContent was provided, restore it
+      if (initialContent && typeof initialContent === 'string') {
+        bytes.value = encoder.encode(initialContent);
+      }
+    }
+  });
+
+  // cleanup watch on unmount
+  const cleanupWithWatch = () => {
+    try { stopWatch(); } catch (e) { /* ignore */ }
+    cleanup();
+  };
+
   if (typeof onBeforeUnmount === 'function') {
-    onBeforeUnmount(cleanup);
+    onBeforeUnmount(cleanupWithWatch);
   }
 
   return instance;

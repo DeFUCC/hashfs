@@ -44,7 +44,33 @@ class HashFSWorker {
       await this.cleanup();
       this.auth = true;
 
-      return { success: true, files: this.getFileList() };
+      // Generate a unique vault fingerprint that:
+      // 1. Remains consistent for the same vault (baseHash)
+      // 2. Has per-session entropy to prevent replay (sessionHash)
+      const vaultData = new Uint8Array(32 + 32); // dbName + first 32 bytes of encKey
+      vaultData.set(encoder.encode(this.keys.dbName).slice(0, 32), 0);
+      vaultData.set(new Uint8Array(this.keys.encKey).slice(0, 32), 32);
+      const baseHash = cryptoUtils.hash(vaultData);
+
+      // Add entropy: timestamp + 32 bytes of random data
+      const entropy = new Uint8Array(40); // 8 bytes timestamp + 32 bytes random
+      new DataView(entropy.buffer).setBigInt64(0, BigInt(Date.now()), true);
+      crypto.getRandomValues(entropy.subarray(8));
+
+      // Combine base hash with entropy
+      const sessionData = new Uint8Array(baseHash.length + entropy.length);
+      sessionData.set(new Uint8Array(baseHash), 0);
+      sessionData.set(entropy, baseHash.length);
+      const sessionHash = cryptoUtils.hash(sessionData);
+
+      return {
+        success: true,
+        files: this.getFileList(),
+        messageHash: {
+          base: baseHash,     // Consistent hash for same vault
+          session: sessionHash // Unique per-session with entropy
+        }
+      };
     } catch (error) {
       return { success: false, error: error.message };
     }
