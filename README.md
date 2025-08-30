@@ -206,19 +206,33 @@ vault.close(); // Close and terminate internal worker/session
 ```js
 const file = useFile("document.md", "# Hello");
 
-// Reactive bindings
-file.text; // Ref<string> - Auto-decoded text content
-file.bytes; // Ref<Uint8Array> - Raw binary content
+// Instance shape (returns a singleton per filename)
+file.loading; // Ref<boolean> - load/save operation in progress
+file.filename; // string - the file name (read-only on instance)
 file.mime; // Ref<string> - MIME type
-file.isDirty; // Computed<boolean> - Unsaved changes
-file.versions; // Ref<number> - Number of versions
+file.text; // ComputedRef<string> - UTF-8 text view (getter decodes bytes, setter encodes & marks dirty)
+file.bytes; // Ref<Uint8Array> - raw binary content
+file.dirty; // Ref<boolean> - unsaved changes
+file.currentVersion; // Ref<number> - currently loaded version number
+file.availableVersions; // Ref<{min:number,max:number}> - range of available versions
+file.canUndo; // ComputedRef<boolean> - whether undo is possible
+file.canRedo; // ComputedRef<boolean> - whether redo is possible
 
-// Methods
-await file.save(); // Save current state
-await file.import(blob); // Import from Blob/File
-await file.export(); // Export as Blob
-await file.rename("new.md");
-await file.delete();
+// Methods (all async when performing IO)
+await file.load(version = null); // Load latest or specified version
+await file.save(); // Persist current bytes to the vault
+await file.import(fileBlob); // Import from a Blob/File (reads bytes, sets mime and saves)
+file.export(); // Triggers a browser download of the file (no return value)
+await file.rename(newName); // Rename file in vault
+await file.delete(); // Delete file from vault
+await file.undo(); // Load previous version
+await file.redo(); // Load next version
+
+// Options
+useFile(name, initialContent, { autoSave: true|false, autoSaveDelay: milliseconds, mime, passphrase })
+// - autoSave: enabled by default; autoSaveDelay defaults to 3000 ms
+// - initialContent: if provided and not authenticated, it initializes the in-memory bytes
+// - passphrase: optional per-file init fallback (attempts WM.init)
 ```
 
 ---
