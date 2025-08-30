@@ -1,5 +1,5 @@
 <script setup vapor>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import HashFS from './src/HashFS.vue';
 import { version } from './package.json'
 

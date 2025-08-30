@@ -1,6 +1,6 @@
 <script setup vapor>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { useHashFS } from './useHashFS.js'
+import { useHashFS, useFile } from './useHashFS.js'
 import { version } from '../package.json'
 
 const props = defineProps({
@@ -8,10 +8,9 @@ const props = defineProps({
 })
 
 const {
-  auth, files, stats, loading, close, importAll, exportZip, importZip, useFile, downloadVault
+  auth, files, stats, loading, close, importAll, exportZip, importZip, downloadVault
 } = useHashFS(props.passphrase)
 
-// UI state
 const selectedFile = ref('')
 const showRenameDialog = ref(false)
 const renameTarget = ref('')
@@ -21,12 +20,10 @@ const fileInput = ref(null)
 const zipInput = ref(null)
 const progressInfo = ref(null)
 
-// Current file instance
 const currentFile = computed(() =>
   selectedFile.value ? useFile(selectedFile.value) : null
 )
 
-// Proxies for nested reactive properties inside the file instance
 const canUndo = computed(() => !!(currentFile.value && currentFile.value.canUndo && currentFile.value.canUndo.value))
 const canRedo = computed(() => !!(currentFile.value && currentFile.value.canRedo && currentFile.value.canRedo.value))
 const currentVersion = computed(() => currentFile.value?.currentVersion?.value ?? 0)
@@ -40,7 +37,6 @@ const currentText = computed({
   set: (v) => { if (currentFile.value?.text) currentFile.value.text.value = v }
 })
 
-// UI helpers
 const hasFiles = computed(() => files.value.length > 0)
 const canEdit = computed(() => {
   if (!currentFile.value) return false
@@ -54,7 +50,6 @@ const isImage = computed(() => {
   return /^image\//.test(mime) || /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(name)
 })
 
-// Image blob URL management
 const blobUrl = ref(null)
 watch([() => currentFile.value?.bytes.value, () => currentFile.value?.mime.value, isImage], () => {
   if (blobUrl.value) {
@@ -75,7 +70,6 @@ onBeforeUnmount(() => {
   if (blobUrl.value) URL.revokeObjectURL(blobUrl.value)
 })
 
-// Status indicator
 const statusText = computed(() => {
   if (loading.value) return '🔄 Initializing...'
   if (!currentFile.value) return '✅ Ready'
@@ -84,7 +78,6 @@ const statusText = computed(() => {
   return '✅ Ready'
 })
 
-// Utility functions
 function formatSize(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return '0 B'
   if (bytes < 1024) return `${bytes} B`
@@ -118,13 +111,10 @@ function getCompressionRatio(originalSize, compressedSize) {
   return ((originalSize - compressedSize) / originalSize) * 100
 }
 
-// Progress handler
 function handleProgress(progress) {
   progressInfo.value = progress
 }
 
-// File operations
-// Handle regular file imports
 async function handleImport(fileList) {
   if (!fileList?.length) return
 
@@ -141,7 +131,6 @@ async function handleImport(fileList) {
   }
 }
 
-// Handle ZIP vault imports
 async function handleImportZip(fileList) {
   if (!fileList?.length) return
   const zipFile = fileList[0]
@@ -164,7 +153,6 @@ async function handleImportZip(fileList) {
   }
 }
 
-// Handle import results for both regular and ZIP imports
 function handleImportResults(results) {
   const failed = results.filter(r => !r.success)
   const succeeded = results.filter(r => r.success)
@@ -265,7 +253,6 @@ async function handleExportZip() {
   }
 }
 
-// Drag & drop
 function handleDragOver(e) {
   e.preventDefault()
   dragOver.value = true
@@ -280,7 +267,6 @@ async function handleDrop(e) {
   dragOver.value = false
   const files = e.dataTransfer.files
 
-  // If single ZIP file, use ZIP import
   if (files.length === 1 && files[0].name.endsWith('.zip')) {
     await handleImportZip(files)
   } else {
@@ -291,7 +277,6 @@ async function handleDrop(e) {
 
 
 function handleKeydown(e) {
-  // Use meta/ctrl + z for undo, meta/ctrl + shift + z for redo
   if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
     if (e.shiftKey) {
       currentFile.value?.canRedo && currentFile.value.redo();
@@ -302,7 +287,6 @@ function handleKeydown(e) {
     return;
   }
 
-  // Save/Export shortcuts
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     currentFile.value?.save && currentFile.value.save();
     e.preventDefault();

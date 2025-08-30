@@ -9,7 +9,7 @@ class HashFSWorker {
     this.db = null;
     this.chainManager = null;
     this.metadata = { files: {} };
-    this.fileBuffers = new Map(); // File buffer cache
+    this.fileBuffers = new Map();
   }
 
   async init(passphrase) {
@@ -29,7 +29,6 @@ class HashFSWorker {
         verify: (hash, sig) => this.keys.verify(hash, sig)
       });
 
-      // Load metadata
       try {
         const encrypted = await this.db.get('meta', 'index');
         if (encrypted) {
@@ -67,8 +66,8 @@ class HashFSWorker {
         success: true,
         files: this.getFileList(),
         messageHash: {
-          base: baseHash,     // Consistent hash for same vault
-          session: sessionHash // Unique per-session with entropy
+          base: baseHash,
+          session: sessionHash
         }
       };
     } catch (error) {
@@ -83,26 +82,19 @@ class HashFSWorker {
     if (!meta?.activeKey) return { bytes: new Uint8Array(), mime: 'text/plain' };
 
     try {
-      // Get file chain
       const chain = await this.chainManager.getChain(meta.chainId);
 
-      // Determine which version to load
       let targetVersion;
       if (version === null) {
-        // Load latest
         targetVersion = chain.versions[chain.versions.length - 1];
       } else {
-        // Find specific version
         targetVersion = chain.versions.find(v => v.version === version);
-        if (!targetVersion) {
-          throw new Error(`Version ${version} not found`);
-        }
+        if (!targetVersion) { throw new Error(`Version ${version} not found`); }
       }
 
       const encrypted = await this.db.get('files', targetVersion.key);
       if (!encrypted) {
         if (version === null) {
-          // Latest version is corrupted - remove file
           delete this.metadata.files[filename];
           await this.saveMetadata();
         }
@@ -112,16 +104,13 @@ class HashFSWorker {
       const decrypted = await cryptoUtils.decrypt(encrypted, this.keys.encKey);
       const inflated = await compress.inflate(decrypted);
 
-      // Verify integrity
-      // Use BLAKE3 for hash verification
       const hash = cryptoUtils.hash(inflated);
       if (hash !== targetVersion.hash || !this.keys.verify(hash, targetVersion.sig)) {
         throw new Error('Integrity verification failed');
       }
 
-      // Return transferable buffer with version info
       return {
-        bytes: inflated.slice(), // Transfer ownership
+        bytes: inflated.slice(),
         mime: meta.mime,
         size: inflated.length,
         version: targetVersion.version,
@@ -144,7 +133,6 @@ class HashFSWorker {
     const fileBytes = new Uint8Array(bytes);
     const hash = cryptoUtils.hash(fileBytes);
 
-    // Initialize metadata if new file
     if (!this.metadata.files[filename]) {
       this.metadata.files[filename] = {
         mime,
@@ -159,7 +147,6 @@ class HashFSWorker {
 
     const meta = this.metadata.files[filename];
 
-    // Check if content unchanged
     try {
       const chain = await this.chainManager.getChain(meta.chainId);
       const latest = chain.versions[chain.versions.length - 1];
@@ -170,9 +157,7 @@ class HashFSWorker {
         }
         return { success: true, unchanged: true };
       }
-    } catch (error) {
-      console.warn('Chain verification failed:', error);
-    }
+    } catch (error) { console.warn('Chain verification failed:', error); }
 
     try {
       const sig = this.keys.sign(hash);
@@ -182,11 +167,9 @@ class HashFSWorker {
       const compressed = await compress.deflate(fileBytes);
       const encrypted = await cryptoUtils.encrypt(compressed, this.keys.encKey);
 
-      // Atomic save
       const tx = this.db.transaction(['files', 'meta'], 'readwrite');
       await tx.objectStore('files').put(encrypted, key);
 
-      // Update metadata
       meta.mime = mime;
       meta.headVersion = version;
       meta.lastModified = Date.now();
@@ -197,7 +180,6 @@ class HashFSWorker {
       await this.saveMetadata(tx);
       await tx.done;
 
-      // Update chain
       await this.chainManager.addVersion(meta.chainId, {
         version, hash, sig, key,
         size: fileBytes.length,
@@ -269,9 +251,6 @@ class HashFSWorker {
     }
   }
 
-
-  // Create a zip archive (Uint8Array) of all files in the vault.
-  // Posts progress messages using operationId when provided.
   async exportZip(operationId = null) {
     const entries = {};
     const items = Object.entries(this.metadata.files);
@@ -284,14 +263,9 @@ class HashFSWorker {
           const encrypted = await this.db.get('files', meta.activeKey);
           const decrypted = await cryptoUtils.decrypt(encrypted, this.keys.encKey);
           const content = await compress.inflate(decrypted);
-
-          // Add file content as Uint8Array; ZIP will preserve full path in keys
           entries[name] = new Uint8Array(content);
-          // preserve MIME type for round-trip
           metaMap[name] = meta.mime || 'application/octet-stream';
-        } catch (e) {
-          console.warn(`Export ZIP failed for ${name}:`, e);
-        }
+        } catch (e) { console.warn(`Export ZIP failed for ${name}:`, e); }
       }
 
       completed++;
@@ -300,7 +274,6 @@ class HashFSWorker {
       }
     }
 
-    // Attach metadata manifest so we can restore MIME types on import
     try {
       const metaBytes = encoder.encode(JSON.stringify({ mimes: metaMap }));
       entries['.hashfs_meta.json'] = metaBytes;
@@ -308,20 +281,15 @@ class HashFSWorker {
       console.warn('Failed to encode export metadata:', e);
     }
 
-    // Create ZIP (Uint8Array)
     const zipped = compress.zip(entries, { level: 6 });
-    return zipped; // Uint8Array
+    return zipped;
   }
 
-  // Import a zip archive (ArrayBuffer) and return array of file entries using
-  // the standard transferable interface: [{ name, success, data: { filename, mime, bytes, size } }, ...]
-  // Posts progress messages using operationId when provided.
   async importZip(arrayBuffer, operationId = null) {
     const results = [];
     try {
       const u8 = new Uint8Array(arrayBuffer);
       const decompressed = compress.unzip(u8);
-      // Parse metadata manifest if present to recover original MIME types
       let metaMap = {};
       if (decompressed['.hashfs_meta.json']) {
         try {
@@ -329,16 +297,13 @@ class HashFSWorker {
           const rawU8 = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
           const parsed = JSON.parse(decoder.decode(rawU8));
           metaMap = parsed && parsed.mimes ? parsed.mimes : {};
-        } catch (e) {
-          console.warn('Failed to parse ZIP metadata:', e);
-        }
+        } catch (e) { console.warn('Failed to parse ZIP metadata:', e); }
       }
 
       const entries = Object.entries(decompressed);
       let completed = 0;
 
       for (const [filepath, data] of entries) {
-        // skip internal metadata file
         if (filepath === '.hashfs_meta.json') {
           completed++;
           if (operationId) {
@@ -358,24 +323,18 @@ class HashFSWorker {
           };
 
           results.push({ name: filepath, success: true, data: transferData });
-        } catch (err) {
-          results.push({ name: filepath, success: false, error: err.message });
-        }
+        } catch (err) { results.push({ name: filepath, success: false, error: err.message }); }
 
         completed++;
         if (operationId) {
           self.postMessage({ type: 'progress', operationId, completed, total: entries.length, current: filepath });
         }
       }
-    } catch (error) {
-      throw new Error(`ZIP import failed: ${error.message}`);
-    }
+    } catch (error) { throw new Error(`ZIP import failed: ${error.message}`); }
 
     return results;
   }
 
-  // Import regular files, each file is { name, bytes, type }
-  // Returns array of file entries using the standard transferable interface
   async importFiles(files, operationId = null) {
     const results = [];
     let completed = 0;
