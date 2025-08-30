@@ -15,7 +15,7 @@ export default defineConfig({
 	build: {
 		copyPublicDir: false,
 		lib: {
-			entry: ['src/useHashFS.js'],
+			entry: ['src/index.js'],
 			formats: ['es'],
 			fileName: 'index'
 		},

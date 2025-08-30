@@ -12,6 +12,7 @@ HashFS is a production-ready Vue 3 composable that provides industry-standard en
 - 🔗 **Hash chain integrity** - Cryptographic verification of entire file history
 - 🖋️ **Ed25519 signatures** - Tamper-proof authenticity for every version
 - 📦 **Content addressing** - SHA-256 deduplication with automatic compression
+ - 📦 **Content addressing** - BLAKE3 deduplication with automatic compression
 - ⏱️ **Version control** - Immutable history with configurable retention and undo/redo
 - ⚡ **Offline-first** - Works completely offline using IndexedDB
 - 🎨 **Vue 3 reactive** - Seamless two-way binding with auto-save
@@ -76,16 +77,16 @@ This creates an unforgeable history where any tampering breaks the entire chain.
 ### Key Derivation Pipeline
 
 ```
-Passphrase → PBKDF2(120k iter) → 64-byte Master Key
-                                       ├─ Signing Key (32b) → Ed25519
-                                       ├─ Encrypt Key (32b) → AES-256-GCM
-                                       └─ Vault ID (16b) → Unique namespace
+Passphrase → scrypt(N=2^17, r=8, p=1) → 32-byte Master Key
+                                       ├─ HKDF-SHA256(..., "signing") → Signing Key (32b) → Ed25519
+                                       ├─ HKDF-SHA256(..., "encryption") → Encrypt Key (32b) → AES-256-GCM
+                                       └─ BLAKE3(pubKey)[0..15] → Vault namespace (dbName)
 ```
 
 ### Storage Flow
 
 ```
-Content → SHA-256 → Ed25519 Sign → Chain Link → Deflate → AES-GCM → IndexedDB
+Content → BLAKE3 (content-address) → Chain link metadata → JSON chain → DEFLATE (fflate) → BLAKE3(compressed) → Ed25519 sign(compressed hash) → AES-GCM encrypt(compressed bytes) → IndexedDB (payload + signature)
 ```
 
 ## 🚀 Quick Start
@@ -185,14 +186,17 @@ const vault = useHashFS(passphrase);
 // State
 vault.auth; // Ref<boolean> - Vault unlocked status
 vault.loading; // Ref<boolean> - Operation in progress
-vault.files; // ComputedRef<FileInfo[]> - File index
+vault.files; // Ref<FileInfo[]> - File index
+vault.stats; // ComputedRef - aggregate stats (sizes, compression ratio)
 
 // Operations
-await vault.exportAll(); // Export entire vault
-await vault.importFile(); // Import a file object
-await vault.deleteFile(); // Delete a file
+await vault.importAll(fileList, onProgress); // Bulk import File[] from an <input>
+await vault.exportZip(onProgress); // Export vault contents as a zip (Uint8Array)
+await vault.importZip(arrayBuffer, onProgress); // Import vault contents from zip
+await vault.downloadVault(filename, onProgress); // Trigger browser download of vault zip
+vault.close(); // Close and terminate internal worker/session
 
-vault.useFile(); // The reactive file reference
+// Note: `useFile` is provided as a separate composable (re-exported by the package). Use `useFile(name, defaultContent)` to bind to a single file resource.
 ```
 
 ---
@@ -243,25 +247,29 @@ Each entry in `vault.files` contains:
 // Each version forms a link in the cryptographic chain
 {
   version: 3,                    // Sequential version number
-  hash: "abc123...",            // SHA-256 of content
-  sig: "def456...",             // Ed25519 signature of hash
-  key: "sk_789...",             // Storage key (hash:sig)
-  size: 1024,                   // Original content size
-  ts: 1703123456789,           // Creation timestamp
-  parentHash: "xyz999..."       // Links to previous version
+  hash: "abc123...",           // BLAKE3 of content (content-address)
+  sig: "def456...",            // Ed25519 signature over the compressed chain bytes' hash
+  key: "sk_789...",            // Storage key / content identifier
+  size: 1024,                    // Original content size
+  ts: 1703123456789,             // Creation timestamp
+  parentHash: "xyz999..."      // Links to previous version
 }
 ```
 
 ### Verification Process
 
-```javascript
+```
 // HashFS automatically verifies:
-1. Content matches hash (integrity)
-2. Signature is valid (authenticity)
-3. Chain links are unbroken (history)
+1. Content matches its BLAKE3 content-address (integrity)
+2. Chain authenticity via Ed25519 signature (signatures are made over the compressed chain bytes' hash)
+3. Chain links are unbroken (parent pointers and version sequencing)
 4. No versions are missing (completeness)
 
-// Any failure throws an error and prevents access
+// Implementation notes:
+// - Chain JSON is serialized and DEFLATE-compressed, then the compressed bytes are hashed (BLAKE3) and signed with Ed25519.
+// - The compressed bytes are then encrypted with AES-GCM and stored in IndexedDB together with the signature field.
+// - On load the encrypted payload is decrypted, the compressed bytes' hash is verified against the stored signature, and finally the JSON is inflated and parsed.
+// Any verification failure prevents access to the chain.
 ```
 
 ## 🛡️ Security Guarantees

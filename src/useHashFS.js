@@ -2,8 +2,6 @@ import { ref, computed, watch } from 'vue';
 
 import { WorkerManager } from './WorkerManager';
 
-export * from './useFile'
-
 export const encoder = new TextEncoder();
 export const decoder = new TextDecoder();
 

@@ -1,6 +1,6 @@
 <script setup vapor>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { useHashFS, useFile } from './useHashFS.js'
+import { useHashFS, useFile } from './index.js'
 import { version } from '../package.json'
 
 const props = defineProps({
