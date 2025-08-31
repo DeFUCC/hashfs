@@ -40,6 +40,8 @@ watch(passphrase, (val) => {
 
     .text-sm.op-80 HashFS is a production-ready reactive Vue composable package that provides secure file persistence in the browser. It combines content-addressable storage, Ed25519 signatures, and cryptographic hash chains to create zero-trust file vaults with complete privacy - offline, no servers, no tracking, no data leaks.
 
+    .mx-auto.rounded-xl.bg-stone-600.text-stone-200.p-4 npm install hashfs
+
     .flex.items-center.w-full.text-center.gap-4.justify-center
       a.flex.items-center.gap-2.bg-stone-700.p-4.rounded-xl.shadow-lg.text-stone-100(href="https://www.npmjs.com/package/hashfs" target="_blank") 
         .i-lucide-code
@@ -47,9 +49,11 @@ watch(passphrase, (val) => {
       a.flex.items-center.gap-2.bg-stone-700.p-4.rounded-xl.shadow-lg.text-stone-100(href="https://github.com/DeFUCC/hashfs" target="_blank") 
         .i-lucide-github
         span GitHub
+      a.flex.items-center.gap-2.bg-stone-700.p-4.rounded-xl.shadow-lg.text-stone-100(href="https://www.youtube.com/watch?v=Mlb6c5E_PyI" target="_blank") 
+        .i-lucide-youtube
+        span YouTube
 
-    .mx-auto.rounded-xl.bg-stone-600.text-stone-200.p-4 npm install hashfs
-    pre.w-full.rounded-xl.bg-stone-300.p-4.overflow-x-auto.whitespace-pre-wrap.break-words. 
+    pre.text-sm.w-full.rounded-xl.bg-stone-300.p-4.overflow-x-auto.whitespace-pre-wrap.break-words. 
 
       import { ref } from "vue"; // Vue is a peer dependency
       import { useHashFS, useFile } from "hashfs";
