@@ -49,39 +49,14 @@ watch(passphrase, (val) => {
         span GitHub
 
     .mx-auto.rounded-xl.bg-stone-600.text-stone-200.p-4 npm install hashfs
-    pre.w-full.rounded-xl.bg-stone-300.p-4. 
-      import { ref } from "vue";
-      import { useHashFS } from "hashfs";
+    pre.w-full.rounded-xl.bg-stone-300.p-4.overflow-x-auto.whitespace-pre-wrap.break-words. 
 
-      const {
-        auth,
-        files,
-        stats,
-        loading,
-        close,
-        importAll,
-        exportZip,
-        importZip,
-        downloadVault,
-        useFile
-      } = useHashFS("your-secure-passphrase")
+      import { ref } from "vue"; // Vue is a peer dependency
+      import { useHashFS, useFile } from "hashfs";
 
-    pre.w-full.mx-auto.rounded-xl.bg-stone-300.p-4. 
+      const { auth, files, stats, loading, close, importAll, exportZip, importZip, downloadVault } = useHashFS("your-secure-passphrase")
 
-      const {
-        loading,
-        filename,
-        mime,
-        text,
-        bytes,
-        dirty,
-        load,
-        save,
-        rename,
-        delete,
-        import,
-        export
-      } = useFile()
+      const  { loading, filename, mime, text, bytes, dirty, currentVersion, availableVersions, canUndo, canRedo, undo, redo, load, save, rename, delete: deleteFile, import: importFile, export: exportFile } = useFile()
 
   template(v-else)
     button.p-4.rounded-lg.absolute.top-4.right-4(@click="passphrase = null; inp = null")
