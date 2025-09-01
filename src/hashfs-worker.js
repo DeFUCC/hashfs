@@ -1,6 +1,6 @@
-// HashFS Web Worker - Handles crypto, storage, and chain management
-import { openDB } from 'idb';
+// HashFS Web Worker - Streamlined with VaultManager
 import { cryptoUtils, compress, createChainManager, encoder, decoder } from './crypto.js';
+import { VaultManager } from './VaultManager.js';
 
 class HashFSWorker {
   constructor() {
@@ -9,54 +9,35 @@ class HashFSWorker {
     this.db = null;
     this.chainManager = null;
     this.metadata = { files: {} };
-    this.fileBuffers = new Map();
+    this.vaultManager = new VaultManager();
   }
 
   async init(passphrase) {
     try {
       this.keys = await cryptoUtils.deriveKeys(passphrase);
 
-      this.db = await openDB(this.keys.dbName, 1, {
-        upgrade(database) {
-          if (!database.objectStoreNames.contains('files')) database.createObjectStore('files');
-          if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta');
-          if (!database.objectStoreNames.contains('chains')) database.createObjectStore('chains');
-        }
-      });
+      // Use VaultManager for robust database initialization
+      const { db, metadata } = await this.vaultManager.initVault(this.keys);
+      this.db = db;
+      this.metadata.files = metadata;
 
       this.chainManager = createChainManager(this.db, this.keys.encKey, undefined, {
         sign: (hash) => this.keys.sign(hash),
         verify: (hash, sig) => this.keys.verify(hash, sig)
       });
 
-      try {
-        const encrypted = await this.db.get('meta', 'index');
-        if (encrypted) {
-          const decrypted = await cryptoUtils.decrypt(encrypted, this.keys.encKey);
-          const data = JSON.parse(decoder.decode(decrypted));
-          this.metadata.files = data.files || {};
-        }
-      } catch (e) {
-        console.warn('Metadata load failed:', e);
-      }
-
-      await this.cleanup();
       this.auth = true;
 
-      // Generate a unique vault fingerprint that:
-      // 1. Remains consistent for the same vault (baseHash)
-      // 2. Has per-session entropy to prevent replay (sessionHash)
-      const vaultData = new Uint8Array(32 + 32); // dbName + first 32 bytes of encKey
+      // Generate vault fingerprint
+      const vaultData = new Uint8Array(64);
       vaultData.set(encoder.encode(this.keys.dbName).slice(0, 32), 0);
       vaultData.set(new Uint8Array(this.keys.encKey).slice(0, 32), 32);
       const baseHash = cryptoUtils.hash(vaultData);
 
-      // Add entropy: timestamp + 32 bytes of random data
-      const entropy = new Uint8Array(40); // 8 bytes timestamp + 32 bytes random
+      const entropy = new Uint8Array(40);
       new DataView(entropy.buffer).setBigInt64(0, BigInt(Date.now()), true);
       crypto.getRandomValues(entropy.subarray(8));
 
-      // Combine base hash with entropy
       const sessionData = new Uint8Array(baseHash.length + entropy.length);
       sessionData.set(new Uint8Array(baseHash), 0);
       sessionData.set(entropy, baseHash.length);
@@ -65,10 +46,8 @@ class HashFSWorker {
       return {
         success: true,
         files: this.getFileList(),
-        messageHash: {
-          base: baseHash,
-          session: sessionHash
-        }
+        messageHash: { base: baseHash, session: sessionHash },
+        recoveryInfo: this.vaultManager.getRecoveryInfo()
       };
     } catch (error) {
       return { success: false, error: error.message };
@@ -89,12 +68,30 @@ class HashFSWorker {
         targetVersion = chain.versions[chain.versions.length - 1];
       } else {
         targetVersion = chain.versions.find(v => v.version === version);
-        if (!targetVersion) { throw new Error(`Version ${version} not found`); }
+        if (!targetVersion) throw new Error(`Version ${version} not found`);
       }
 
       const encrypted = await this.db.get('files', targetVersion.key);
       if (!encrypted) {
+        // Attempt recovery using VaultManager
         if (version === null) {
+          const recovered = await this.vaultManager.recoverFileFromPreviousVersion(
+            this.db, meta, this.keys.encKey
+          );
+
+          if (recovered) {
+            await this.saveMetadata();
+            return {
+              ...recovered,
+              mime: meta.mime,
+              currentVersion: meta.headVersion,
+              availableVersions: {
+                min: chain.versions[0]?.version || 0,
+                max: meta.headVersion
+              }
+            };
+          }
+
           delete this.metadata.files[filename];
           await this.saveMetadata();
         }
@@ -376,71 +373,30 @@ class HashFSWorker {
   }
 
   async saveMetadata(tx = null) {
-    const data = { files: this.metadata.files, schemaVersion: 5 };
-    const bytes = encoder.encode(JSON.stringify(data));
-    const encrypted = await cryptoUtils.encrypt(bytes, this.keys.encKey);
-
-    if (tx) {
-      await tx.objectStore('meta').put(encrypted, 'index');
-    } else {
-      await this.db.put('meta', encrypted, 'index');
-    }
+    await this.vaultManager.saveMetadata(this.db, this.metadata.files, this.keys.encKey, tx);
   }
 
-  async cleanup() {
-    const referenced = new Set();
-    const ghostFiles = [];
+  // Manual integrity check operation
+  async runIntegrityCheck() {
+    if (!this.auth) return { success: false, error: 'Not authenticated' };
 
-    for (const [fileName, meta] of Object.entries(this.metadata.files)) {
-      let hasValidContent = false;
+    try {
+      const result = await this.vaultManager.performFullIntegrityCheck(
+        this.db, this.metadata, this.keys.encKey, this.keys
+      );
 
-      if (meta.chainId) {
-        try {
-          const chain = await this.chainManager.getChain(meta.chainId);
-          chain.versions.forEach(v => {
-            if (v.key) {
-              referenced.add(v.key);
-              hasValidContent = true;
-            }
-          });
-        } catch (error) {
-          console.warn(`Chain load failed for ${fileName}:`, error);
-        }
+      // Save updated metadata after cleanup
+      if (result.filesRemoved.length > 0) {
+        await this.saveMetadata();
       }
 
-      if (meta.activeKey) {
-        try {
-          const exists = await this.db.get('files', meta.activeKey);
-          if (exists) {
-            referenced.add(meta.activeKey);
-            hasValidContent = true;
-          }
-        } catch (error) {
-          console.warn(`ActiveKey check failed for ${fileName}:`, error);
-        }
-      }
-
-      if (!hasValidContent && (meta.activeKey || meta.headVersion > 0)) {
-        ghostFiles.push(fileName);
-      }
-    }
-
-    if (ghostFiles.length > 0) {
-      ghostFiles.forEach(name => delete this.metadata.files[name]);
-      await this.saveMetadata();
-    }
-
-    // Cleanup orphaned files
-    const allKeys = await this.db.getAllKeys('files');
-    const orphaned = allKeys.filter(key => !referenced.has(key));
-
-    if (orphaned.length > 0) {
-      const tx = this.db.transaction(['files'], 'readwrite');
-      for (const key of orphaned) {
-        try { await tx.objectStore('files').delete(key); }
-        catch (e) { console.warn('Cleanup failed for:', key, e); }
-      }
-      await tx.done;
+      return {
+        success: true,
+        result,
+        files: this.getFileList()
+      };
+    } catch (error) {
+      return { success: false, error: error.message };
     }
   }
 }
@@ -459,7 +415,6 @@ self.onmessage = async (e) => {
         result = await worker.init(data.passphrase);
         break;
       case 'load':
-        // forward optional version parameter so the worker can load a specific version
         result = await worker.loadFile(data.filename, data.version);
         break;
       case 'save':
@@ -472,45 +427,40 @@ self.onmessage = async (e) => {
         result = await worker.renameFile(data.oldName, data.newName);
         break;
       case 'export-zip':
-        // data.operationId is optional; returns a Uint8Array
         result = await worker.exportZip(data?.operationId);
         break;
       case 'import-zip':
-        // data.arrayBuffer required; data.operationId optional
         result = await worker.importZip(data.arrayBuffer, data?.operationId);
         break;
       case 'import-files':
-        // data.files required; data.operationId optional
         result = await worker.importFiles(data.files, data?.operationId);
         break;
       case 'get-files':
         result = worker.getFileList();
         break;
+      case 'integrity-check':
+        result = await worker.runIntegrityCheck();
+        break;
       default:
         throw new Error(`Unknown operation: ${type}`);
     }
 
-    // Determine transferable objects for the result
     const transferable = [];
 
-    // If result is a Uint8Array (zip), transfer its buffer
     if (result instanceof Uint8Array) {
       transferable.push(result.buffer);
     }
 
-    // If result is an object containing bytes (file load), transfer the ArrayBuffer
     if (result && result.bytes instanceof Uint8Array) {
       transferable.push(result.bytes.buffer);
     }
 
-    // If result is an array of items with data.bytes ArrayBuffer, transfer those
     if (Array.isArray(result)) {
       result.forEach(item => {
         if (item?.data?.bytes instanceof ArrayBuffer) transferable.push(item.data.bytes);
       });
     }
 
-    // If result is an object mapping names to file objects with content arrays, no transfer needed
     self.postMessage({ id, success: true, result }, transferable);
 
   } catch (error) {
