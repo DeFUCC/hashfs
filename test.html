@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>#FS test</title>
+  <script type="importmap"> { "imports": { "vue": "https://esm.sh/vue", "hashfs": "https://esm.sh/hashfs" } } </script>
+</head>
+
+<body>
+  <div id="app" style="display:flex; flex-direction: column; gap: 1em;">
+    <h1>HashFS Minimal HTML test</h1>
+    <h3>Type in a 8+ characters passphrase</h3>
+    <input type="text" id="input" style="width:80svw;">
+    <h4>Edit a text file in your encrypted vault.</h4>
+    <small>Autosaves on </small>
+    <textarea style="width:80svw;height:60svh" id="text" disabled></textarea>
+  </div>
+  <script type="module">
+    import { ref, watch } from 'vue'
+    import { useHashFS, useFile } from 'hashfs'
+
+    const md = useFile('readme.md', '## Initial content')
+
+    const input = document.getElementById('input')
+
+    input.addEventListener('change', e => { const fs = useHashFS(e?.target?.value) })
+
+    const textarea = document.getElementById('text')
+
+    watch(md.loading, l => { if (!l) { textarea.disabled = false } }, { immediate: true })
+
+    watch(md.text, t => { textarea.innerText = t }, { immediate: true })
+
+    textarea.addEventListener('change', e => { md.text.value = e?.target?.value; md.save() })
+
+  </script>
+</body>
+
+</html>
