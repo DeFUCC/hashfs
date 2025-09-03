@@ -1,6 +1,7 @@
 <script setup vapor>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useHashFS, useFile } from './index.js'
+import ChatDemo from './chat/ChatDemo.vue'
 import { version } from '../package.json'
 
 const props = defineProps({
@@ -19,6 +20,13 @@ const dragOver = ref(false)
 const fileInput = ref(null)
 const zipInput = ref(null)
 const progressInfo = ref(null)
+
+// Simple chat demo toggle state
+const showChatDemo = ref(false)
+
+function openChatDemo() {
+  showChatDemo.value = true
+}
 
 const currentFile = computed(() =>
   selectedFile.value ? useFile(selectedFile.value) : null
@@ -77,6 +85,7 @@ const statusText = computed(() => {
   if (currentFile.value.dirty.value) return '📝 Unsaved changes'
   return '✅ Ready'
 })
+
 
 function formatSize(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return '0 B'
@@ -352,6 +361,12 @@ onBeforeUnmount(async () => {
         )
 
       button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.text-sm.font-medium(
+        @click="openChatDemo"
+        :disabled="loading"
+        title="Open Chat Demo"
+      ) 💬 Chat Demo
+
+      button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.text-sm.font-medium(
         v-if="hasFiles"
         @click="handleExportZip"
         :disabled="loading"
@@ -368,8 +383,10 @@ onBeforeUnmount(async () => {
       span Processing: {{ progressInfo.current }}
       span {{ progressInfo.completed }} / {{ progressInfo.total }}
 
+  //- Chat Demo
+  ChatDemo(v-if="auth && showChatDemo" @close="showChatDemo = false" :namespace="'chat'" :space="'demo'" :chunkSize="200")
   //- Main Content
-  .grid.grid-cols-2.gap-2.min-h-600px(v-if="auth")
+  .grid.grid-cols-2.gap-2.min-h-600px(v-if="auth && !showChatDemo")
     //- Sidebar - File List
     .bg-stone-50.rounded-lg.border.border-stone-200
       .p-4.border-b.border-stone-200.bg-white.rounded-t-lg
@@ -510,7 +527,7 @@ onBeforeUnmount(async () => {
           v-else-if="!currentFile?.loading.value && !loading"
         )
           .text-7xl.mb-4 🔒
-          h2.m-0.mb-3.text-xl.font-semibold.text-stone-700 Secure Vault
+          h2.m-0.mb-3.text-xl.font-bold.text-stone-700 Secure Vault
           p.m-0.text-stone-500.mb-6.max-w-md
             | Select a file from the sidebar or create a new one to get started.
 
@@ -566,5 +583,9 @@ onBeforeUnmount(async () => {
 
 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+.chat-pane {
+  max-height: 60svh; /* limit chat window height */
 }
 </style>
