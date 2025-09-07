@@ -1,6 +1,6 @@
 import { ref, computed, watch } from 'vue';
 
-import { WorkerManager } from './WorkerManager';
+import { WorkerManager } from './WorkerManager.js';
 
 export const encoder = new TextEncoder();
 export const decoder = new TextDecoder();

@@ -1,2 +1,2 @@
-export { useHashFS } from './useHashFS'
-export { useFile } from './useFile'
+export { useHashFS } from './useHashFS.js'
+export { useFile } from './useFile.js'
