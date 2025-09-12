@@ -111,7 +111,7 @@ export class VaultManager {
       if (!meta.lastModified) meta.lastModified = Date.now();
       if (!meta.lastSize) meta.lastSize = 0;
       if (!meta.lastCompressedSize) meta.lastCompressedSize = 0;
-      if (!meta.mime) meta.mime = 'text/plain';
+      if (!meta.mime) meta.mime = 'text/markdown';
     });
 
     return { ...data, schemaVersion: this.metadataVersion };

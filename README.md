@@ -123,7 +123,7 @@ This allows you to directly work with a file as a reactive resource, while still
   const vault = useHashFS(passphrase.value);
 
   // Create or open a text file
-  const notes = vault.useFile(vault, "notes.txt", "text/plain");
+  const notes = vault.useFile(vault, "notes.md", { mime: "text/markdown"});
 
   // Reactive text content
   notes.text.value = "Hello, secure world!";

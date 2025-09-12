@@ -58,7 +58,7 @@ class HashFSWorker {
     if (!this.auth) throw new Error('Not authenticated');
 
     const meta = this.metadata.files[filename];
-    if (!meta?.activeKey) return { bytes: new Uint8Array(), mime: 'text/plain' };
+    if (!meta?.activeKey) return { bytes: new Uint8Array(), mime: 'text/markdown' };
 
     try {
       const chain = await this.chainManager.getChain(meta.chainId);
@@ -126,7 +126,7 @@ class HashFSWorker {
   async saveFile(filename, data) {
     if (!this.auth) return { success: false, error: 'Not authenticated' };
 
-    const { bytes, mime = 'text/plain' } = data;
+    const { bytes, mime = 'text/markdown' } = data;
     const fileBytes = new Uint8Array(bytes);
     const hash = cryptoUtils.hash(fileBytes);
 
@@ -364,7 +364,7 @@ class HashFSWorker {
   getFileList() {
     return Object.entries(this.metadata.files).map(([name, meta]) => ({
       name,
-      mime: meta.mime || 'text/plain',
+      mime: meta.mime || 'text/markdown',
       versions: meta.headVersion || 0,
       size: meta.lastSize || 0,
       compressedSize: meta.lastCompressedSize || 0,

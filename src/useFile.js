@@ -13,7 +13,7 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
 
   const loading = ref(true);
   const bytes = ref(new Uint8Array());
-  const mime = ref('text/plain');
+  const mime = ref(fileOptions?.mime || 'text/markdown');
   const dirty = ref(false);
   const bufferKey = ref(null);
   const currentVersion = ref(0);
@@ -50,7 +50,7 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
       load().catch(() => { });
     } else {
       bytes.value = new Uint8Array();
-      mime.value = 'text/plain';
+      mime.value = 'text/markdown';
       dirty.value = false;
       currentVersion.value = 0;
       availableVersions.value = { min: 0, max: 0 };
@@ -71,7 +71,7 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
       if (initialContent) {
         if (typeof initialContent === 'string') {
           bytes.value = encoder.encode(initialContent);
-          mime.value = fileOptions.mime || 'text/plain';
+          mime.value = fileOptions.mime || 'text/markdown';
         } else {
           dirty.value = true;
         }
