@@ -19,8 +19,8 @@ function createFileInstance(filename, initialContent = '', fileOptions = {}) {
   const currentVersion = ref(0);
   const availableVersions = ref({ min: 0, max: 0 });
 
-  const canUndo = computed(() => currentVersion.value > availableVersions.value.min);
-  const canRedo = computed(() => currentVersion.value < availableVersions.value.max);
+  const canUndo = computed(() => currentVersion.value > availableVersions.value?.min);
+  const canRedo = computed(() => currentVersion.value < availableVersions.value?.max);
 
   const text = computed({
     get: () => {
