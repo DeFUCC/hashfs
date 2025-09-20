@@ -11,8 +11,7 @@ HashFS is a production-ready Vue 3 composable that provides industry-standard en
 - 🔒 **Zero-leak privacy** - Everything encrypted client-side, nothing leaves your browser
 - 🔗 **Hash chain integrity** - Cryptographic verification of entire file history
 - 🖋️ **Ed25519 signatures** - Tamper-proof authenticity for every version
-- 📦 **Content addressing** - SHA-256 deduplication with automatic compression
- - 📦 **Content addressing** - BLAKE3 deduplication with automatic compression
+- 📦 **Content addressing** - BLAKE3 deduplication with automatic compression
 - ⏱️ **Version control** - Immutable history with configurable retention and undo/redo
 - ⚡ **Offline-first** - Works completely offline using IndexedDB
 - 🎨 **Vue 3 reactive** - Seamless two-way binding with auto-save
@@ -23,40 +22,58 @@ HashFS is a production-ready Vue 3 composable that provides industry-standard en
 ```html
 <!DOCTYPE html>
 <html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>#FS test</title>
+		<script type="importmap">
+			{ "imports": { "vue": "https://esm.sh/vue" } }
+		</script>
+	</head>
 
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>#FS test</title>
-  <script type="importmap"> { "imports": { "vue": "https://esm.sh/vue" } } </script>
-</head>
+	<body>
+		<div id="app" style="display:flex; flex-direction: column; gap: 1em;">
+			<input type="text" id="input" style="width:80svw;" />
+			<textarea style="width:80svw;height:80svh" id="text" disabled></textarea>
+		</div>
+		<script type="module">
+			import { ref, watch } from "vue";
+			import { useHashFS, useFile } from "./lib/index.js";
 
-<body>
-  <div id="app" style="display:flex; flex-direction: column; gap: 1em;">
-    <input type="text" id="input" style="width:80svw;">
-    <textarea style="width:80svw;height:80svh" id="text" disabled></textarea>
-  </div>
-  <script type="module">
-    import { ref, watch } from 'vue'
-    import { useHashFS, useFile } from './lib/index.js'
+			const md = useFile("readme.md", "## Initial content");
 
-    const md = useFile('readme.md', '## Initial content')
+			const input = document.getElementById("input");
 
-    const input = document.getElementById('input')
+			input.addEventListener("change", (e) => {
+				const fs = useHashFS(e?.target?.value);
+			});
 
-    input.addEventListener('change', e => { const fs = useHashFS(e?.target?.value) })
+			const textarea = document.getElementById("text");
 
-    const textarea = document.getElementById('text')
+			watch(
+				md.loading,
+				(l) => {
+					if (!l) {
+						textarea.disabled = false;
+					}
+				},
+				{ immediate: true }
+			);
 
-    watch(md.loading, l => { if (!l) { textarea.disabled = false } }, { immediate: true })
+			watch(
+				md.text,
+				(t) => {
+					textarea.innerText = t;
+				},
+				{ immediate: true }
+			);
 
-    watch(md.text, t => { textarea.innerText = t }, { immediate: true })
-
-    textarea.addEventListener('change', e => { md.text.value = e?.target?.value; md.save() })
-
-  </script>
-</body>
-
+			textarea.addEventListener("change", (e) => {
+				md.text.value = e?.target?.value;
+				md.save();
+			});
+		</script>
+	</body>
 </html>
 ```
 
@@ -114,25 +131,25 @@ This allows you to directly work with a file as a reactive resource, while still
 
 ```vue
 <script setup>
-  import { ref } from "vue";
-  import { useHashFS } from "hashfs";
+	import { ref } from "vue";
+	import { useHashFS } from "hashfs";
 
-  const passphrase = ref("correct horse battery staple");
+	const passphrase = ref("correct horse battery staple");
 
-  // Unlock the vault
-  const vault = useHashFS(passphrase.value);
+	// Unlock the vault
+	const vault = useHashFS(passphrase.value);
 
-  // Create or open a text file
-  const notes = vault.useFile(vault, "notes.md", { mime: "text/markdown"});
+	// Create or open a text file
+	const notes = vault.useFile(vault, "notes.md", { mime: "text/markdown" });
 
-  // Reactive text content
-  notes.text.value = "Hello, secure world!";
+	// Reactive text content
+	notes.text.value = "Hello, secure world!";
 
-  // Persist change
-  await notes.save();
+	// Persist change
+	await notes.save();
 
-  // Later, read it back
-  console.log(notes.text.value); // "Hello, secure world!"
+	// Later, read it back
+	console.log(notes.text.value); // "Hello, secure world!"
 </script>
 ```
 
@@ -142,35 +159,35 @@ This allows you to directly work with a file as a reactive resource, while still
 
 ```vue
 <script setup>
-  import { ref } from "vue";
-  import { useHashFS } from "hashfs";
+	import { ref } from "vue";
+	import { useHashFS } from "hashfs";
 
-  const passphrase = ref("my-photo-vault");
+	const passphrase = ref("my-photo-vault");
 
-  // Unlock vault
-  const vault = useHashFS(passphrase.value);
+	// Unlock vault
+	const vault = useHashFS(passphrase.value);
 
-  // Work with an image file
-  const avatar = vault.useFile("avatar.png");
+	// Work with an image file
+	const avatar = vault.useFile("avatar.png");
 
-  // Import from an `<input type="file">`
-  const handleFile = async (event) => {
-  const file = event.target.files[0];
-  await avatar.import(file); // Encrypted & stored
-  };
+	// Import from an `<input type="file">`
+	const handleFile = async (event) => {
+		const file = event.target.files[0];
+		await avatar.import(file); // Encrypted & stored
+	};
 
-  // Export and display as object URL
-  const showImage = async () => {
-  const blob = await avatar.export();
-  const url = URL.createObjectURL(blob);
-  document.querySelector("#preview").src = url;
-  };
+	// Export and display as object URL
+	const showImage = async () => {
+		const blob = await avatar.export();
+		const url = URL.createObjectURL(blob);
+		document.querySelector("#preview").src = url;
+	};
 </script>
 
 <template>
-  <input type="file" accept="image/*" @change="handleFile" />
-  <button @click="showImage">Show Stored Image</button>
-  <img id="preview" />
+	<input type="file" accept="image/*" @change="handleFile" />
+	<button @click="showImage">Show Stored Image</button>
+	<img id="preview" />
 </template>
 ```
 
@@ -219,7 +236,7 @@ file.canUndo; // ComputedRef<boolean> - whether undo is possible
 file.canRedo; // ComputedRef<boolean> - whether redo is possible
 
 // Methods (all async when performing IO)
-await file.load(version = null); // Load latest or specified version
+await file.load((version = null)); // Load latest or specified version
 await file.save(); // Persist current bytes to the vault
 await file.import(fileBlob); // Import from a Blob/File (reads bytes, sets mime and saves)
 file.export(); // Triggers a browser download of the file (no return value)
@@ -229,7 +246,12 @@ await file.undo(); // Load previous version
 await file.redo(); // Load next version
 
 // Options
-useFile(name, initialContent, { autoSave: true|false, autoSaveDelay: milliseconds, mime, passphrase })
+useFile(name, initialContent, {
+	autoSave: true | false,
+	autoSaveDelay: milliseconds,
+	mime,
+	passphrase,
+});
 // - autoSave: enabled by default; autoSaveDelay defaults to 3000 ms
 // - initialContent: if provided and not authenticated, it initializes the in-memory bytes
 // - passphrase: optional per-file init fallback (attempts WM.init)
@@ -275,14 +297,17 @@ Each entry in `vault.files` contains:
 ```
 // HashFS automatically verifies:
 1. Content matches its BLAKE3 content-address (integrity)
-2. Chain authenticity via Ed25519 signature (signatures are made over the compressed chain bytes' hash)
-3. Chain links are unbroken (parent pointers and version sequencing)
-4. No versions are missing (completeness)
+2. Chain authenticity via Ed25519 signature (signatures over chain hash)
+3. Chain integrity via binary hash concatenation with domain separation
+4. Individual version signatures and hashes
+5. Automatic recovery from corrupted versions
 
 // Implementation notes:
 // - Chain JSON is serialized and DEFLATE-compressed, then the compressed bytes are hashed (BLAKE3) and signed with Ed25519.
+// - Chain hash is computed using binary concatenation of version hashes with domain separation ('HashFS-Chain-v6').
 // - The compressed bytes are then encrypted with AES-GCM and stored in IndexedDB together with the signature field.
 // - On load the encrypted payload is decrypted, the compressed bytes' hash is verified against the stored signature, and finally the JSON is inflated and parsed.
+// - Legacy chains without chain hash are automatically migrated to the new format.
 // Any verification failure prevents access to the chain.
 ```
 
@@ -300,8 +325,9 @@ Each entry in `vault.files` contains:
 
 - **AES-256-GCM** - Industry-standard authenticated encryption
 - **Ed25519** - State-of-the-art elliptic curve signatures
-- **SHA-256** - Collision-resistant content addressing
-- **PBKDF2** - 120,000 iterations against rainbow tables
+- **BLAKE3** - Fast, secure content addressing and hashing
+- **scrypt** - Memory-hard key derivation (N=2^17, r=8, p=1)
+- **HKDF** - Key separation for signing and encryption
 - **Random IVs** - Fresh entropy for every encryption
 
 ### Integrity Protection
@@ -359,8 +385,8 @@ Browser Environment
 
 ```
 @noble/curves   (Ed25519 signatures)
-@noble/hashes   (SHA-256, PBKDF2)
-@noble/ciphers   (AES-256-GCM)
+@noble/hashes   (BLAKE3, scrypt, HKDF)
+@noble/ciphers  (AES-256-GCM)
 fflate          (Deflate compression)
 ```
 
@@ -395,7 +421,9 @@ This project is licensed under the MIT License.
 
 Built on audited cryptographic primitives:
 
-- **@noble/crypto** - Secure, audited cryptography
+- **@noble/curves** - Secure, audited Ed25519 signatures
+- **@noble/hashes** - Fast, secure BLAKE3 and scrypt implementations
+- **@noble/ciphers** - Industry-standard AES-GCM encryption
 - **Vue.js** - Reactive framework foundation
 - **fflate** - Fast, reliable compression
 - **IndexedDB** - Browser-native storage
