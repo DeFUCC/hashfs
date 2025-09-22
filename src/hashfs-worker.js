@@ -193,7 +193,11 @@ const vault = {
   async saveMetadata(tx) {
     const data = { files: metadata.files, schemaVersion: VERSION_CONFIG.META_VERSION, lastSaved: Date.now() };
     const encrypted = await crypto.encrypt(encoder.encode(JSON.stringify(data)), keys.encKey);
-    await (tx?.objectStore('meta') || db).put(encrypted, 'index');
+    if (tx) {
+      await tx.objectStore('meta').put(encrypted, 'index');
+    } else {
+      await db.put('meta', encrypted, 'index');
+    }
   },
 
   getFileList: () => Object.entries(metadata.files)
@@ -448,12 +452,19 @@ const ops = {
   },
 
   async rename(oldName, newName) {
-    if (!auth || !newName || metadata.files[newName] || !metadata.files[oldName]) {
-      throw new Error('Invalid rename operation');
-    }
+    if (!auth) throw new Error('Not authenticated');
 
-    metadata.files[newName] = metadata.files[oldName];
-    delete metadata.files[oldName];
+    const normalize = s => String(s ?? '').normalize('NFC').trim();
+    const from = normalize(oldName);
+    const to = normalize(newName);
+
+    if (!from || !to) throw new Error('Invalid rename operation');
+    if (!metadata.files[from]) throw new Error(`File "${from}" not found`);
+    if (from === to) return { success: true, files: vault.getFileList() };
+    if (metadata.files[to]) throw new Error('Target name already exists');
+
+    metadata.files[to] = metadata.files[from];
+    delete metadata.files[from];
     await vault.saveMetadata();
     return { success: true, files: vault.getFileList() };
   },
