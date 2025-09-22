@@ -27,7 +27,7 @@ watch(passphrase, (val) => {
 </script>
 
 <template lang="pug">
-.font-mono.mx-auto.pt-20.flex.flex-col.gap-4
+.font-mono.mx-auto.flex.flex-col.gap-4
   form.p-4.flex.flex-col.gap-4.max-w-55ch.mx-auto(v-if="!passphrase" @submit.prevent="passphrase = inp; inp = null")
     img.w-30(:src="'/logo.svg'")
     .flex.items-baseline.gap-2
@@ -63,9 +63,10 @@ watch(passphrase, (val) => {
       const  { loading, filename, mime, text, bytes, dirty, currentVersion, availableVersions, canUndo, canRedo, undo, redo, load, save, rename, delete: deleteFile, import: importFile, export: exportFile } = useFile()
 
   template(v-else)
-    button.p-4.rounded-lg.absolute.top-4.right-4(@click="passphrase = null; inp = null")
-      .i-lucide-x
-    HashFS(:passphrase :key="passphrase")
+    HashFS(:passphrase :key="passphrase") 
+      button.text-sm.text-red-500.bg-white.rounded.flex.gap-2.px-2.py-1.rounded.border.border-stone-300(@click="passphrase = null; inp = null")
+        .i-lucide-log-out
+        span Log out
 
 </template>
 

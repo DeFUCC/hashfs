@@ -304,21 +304,21 @@ onBeforeUnmount(async () => {
 </script>
 
 <template lang="pug">
-.hashfs-vault.font-mono.mx-auto.max-w-7xl.px-4.py-6.min-h-screen(
+.hashfs-vault.font-mono.mx-auto.px-4.py-6.min-h-screen.flex.flex-col(
   @dragover="handleDragOver"
   @dragleave="handleDragLeave"
   @drop="handleDrop"
   :class="{ 'bg-blue-50 border-2 border-dashed border-blue-400 rounded-lg': dragOver }"
 )
-  //- Header
   header.flex.items-center.justify-between.mb-6.pb-4.border-b.border-stone-300.gap-2
-    .flex.items-center.gap-3.gap-2
+    .flex.items-center.gap-3.gap-2.flex-wrap
       img.w-10(:src="'/logo.svg'")
       h1.m-0.text-2xl.font-bold.text-stone-800.flex.items-center.gap-2 #FS 
       a.text-xs.op-40(href="https://www.npmjs.com/package/hashfs" target="_blank") v.{{ version }}
       .text-sm.text-stone-500.px-2.py-1.bg-stone-100.rounded {{ statusText }}
+      slot
 
-    .flex.items-center.gap-2(v-if="auth")
+    .flex.items-center.gap-2.flex-wrap(v-if="auth")
       button.px-3.py-2.rounded.bg-blue-600.text-white.hover-bg-blue-700.transition.text-sm.font-medium(
         @click="handleNewFile"
         :disabled="loading"
@@ -369,7 +369,7 @@ onBeforeUnmount(async () => {
       span {{ progressInfo.completed }} / {{ progressInfo.total }}
 
   //- Main Content
-  .grid.grid-cols-2.gap-2.min-h-600px(v-if="auth")
+  .grid.grid-cols-2.gap-2.flex-auto(v-if="auth")
     //- Sidebar - File List
     .bg-stone-50.rounded-lg.border.border-stone-200
       .p-4.border-b.border-stone-200.bg-white.rounded-t-lg
@@ -431,8 +431,8 @@ onBeforeUnmount(async () => {
     //- Editor Area
     .bg-white.rounded-lg.border.border-stone-200.flex.flex-col
       //- Editor Header
-      .flex.items-center.justify-between.border-b.border-stone-200.p-4(v-if="currentFile")
-        .flex.items-center.gap-2.w-full
+      .flex.items-center.justify-between.border-b.border-stone-200.p-4(v-if="currentFile && availableVersions?.max > 1")
+        .flex.items-center.gap-2.w-full.flex-wrap
           //- Version info
           .text-sm.text-stone-600.px-2(v-if="availableVersions?.max > 0")
             | v.{{ currentVersion }} 
@@ -452,6 +452,7 @@ onBeforeUnmount(async () => {
             @click="currentFile.redo()"
           ) ↪ Redo 
             span(v-if="canRedo") {{ Math.max(0, (availableVersions?.max || 0) - currentVersion) }}
+
       .px-6.py-4.border-b.border-stone-200.bg-stone-50(v-if="currentFile")
         .flex.items-center.justify-between
           .min-w-0.flex-1
