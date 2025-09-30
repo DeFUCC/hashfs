@@ -7,8 +7,8 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { scrypt } from '@noble/hashes/scrypt.js';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { gcm } from '@noble/ciphers/aes.js';
-import { blake3 } from '@noble/hashes/blake3';
-import { hkdf } from '@noble/hashes/hkdf';
+import { blake3 } from '@noble/hashes/blake3.js';
+import { hkdf } from '@noble/hashes/hkdf.js';
 
 const [encoder, decoder] = [new TextEncoder(), new TextDecoder()];
 
