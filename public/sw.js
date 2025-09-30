@@ -1,4 +1,4 @@
-const CACHE_NAME = 'Intelligraphs-v.0.2.0';
+const CACHE_NAME = 'Intelligraphs-v.0.2.11';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
