@@ -204,16 +204,63 @@ const vault = useHashFS(passphrase);
 vault.auth; // Ref<boolean> - Vault unlocked status
 vault.loading; // Ref<boolean> - Operation in progress
 vault.files; // Ref<FileInfo[]> - File index
-vault.stats; // ComputedRef - aggregate stats (sizes, compression ratio)
+vault.stats; // ComputedRef - aggregate stats (sizes, compression ratio, vault metrics)
 
 // Operations
 await vault.importAll(fileList, onProgress); // Bulk import File[] from an <input>
 await vault.exportZip(onProgress); // Export vault contents as a zip (Uint8Array)
 await vault.importZip(arrayBuffer, onProgress); // Import vault contents from zip
 await vault.downloadVault(filename, onProgress); // Trigger browser download of vault zip
+await vault.getVaultSizes(); // Get detailed vault size information
 vault.close(); // Close and terminate internal worker/session
 
 // Note: `useFile` is provided as a separate composable (re-exported by the package). Use `useFile(name, defaultContent)` to bind to a single file resource.
+```
+
+---
+
+## 📊 Vault Size Metrics
+
+HashFS provides three distinct size measurements to help you understand your storage usage:
+
+### Size Types
+
+- **Original Size** - Sum of current file contents (what you'd see if you downloaded all files)
+- **Compressed Size** - Size of vault when exported as ZIP (latest versions only, no version history)
+- **Vault Size** - Total IndexedDB storage including all versions, chains, and metadata
+
+### Example Display
+
+```
+Files (8)
+Original: 2.9 MB           ← Current file contents
+Compressed: 803.0 KB       ← ZIP export size (72.5% smaller!)
+Vault size: 10.9 MB        ← Full IndexedDB storage
+Saved: 72.5%
+```
+
+### Compression Behavior
+
+**Text Files** (Markdown, HTML, JSON):
+- Typically compress 50-70% (amazing ratios!)
+
+**Binary Files** (Images, PDFs, Videos):
+- Already compressed formats may show modest savings or slight growth
+- Growth can occur due to ZIP compression headers on small files
+- Overall vault compression usually more than compensates
+
+### API Usage
+
+```js
+const vault = useHashFS(passphrase);
+
+// Get detailed size information
+const sizes = await vault.getVaultSizes();
+// Returns: { vaultSize: number, vaultCompressedSize: number }
+
+// Access via stats computed property
+console.log(vault.stats.value);
+// Contains: original size, compressed size, vault size, compression ratio
 ```
 
 ---

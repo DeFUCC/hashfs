@@ -37,7 +37,13 @@ const VERSION_CONFIG = {
   get SCRYPT_MAXMEM() { return this.SCRYPT.N * this.SCRYPT.r * this.SCRYPT.p * 128 + (128 * this.SCRYPT.r * this.SCRYPT.p) }
 };
 
-let [auth, keys, db, chainManager, metadata] = [false, null, null, null, { files: {} }];
+let [auth, keys, db, chainManager] = [false, null, null, null];
+
+const metadata = {
+  vaultSize: 0,
+  vaultCompressedSize: 0,
+  files: {}
+}
 
 // ==============
 // CRYPTOGRAPHY MODULE
@@ -121,8 +127,54 @@ const vault = {
     if (!retrieved || retrieved.length !== 3) throw new Error('Database health check failed');
 
     metadata.files = await this.loadMetadata();
-    chainManager = chains.create();
+
+    // Calculate vault sizes
+    const calculateVaultSizes = async () => {
+      let vaultSize = 0;
+      let vaultCompressedSize = 0;
+
+      // Calculate full vault size (all IndexedDB stores)
+      for (const storeName of ['files', 'meta', 'chains', 'integrity']) {
+        try {
+          const allKeys = await db.getAllKeys(storeName);
+          for (const key of allKeys) {
+            const data = await db.get(storeName, key);
+            if (data) {
+              // Account for encrypted data size plus key overhead
+              if (data instanceof Uint8Array) {
+                vaultSize += data.length;
+              } else if (data && typeof data === 'object') {
+                // For complex objects, estimate serialized size
+                vaultSize += JSON.stringify(data).length;
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(`Failed to calculate size for store ${storeName}:`, error);
+        }
+      }
+
+      // Calculate compressed size (latest versions only, no chains)
+      const { entries, metaMap } = await ops.prepareExportEntries();
+
+      // Add metadata to entries (same as exportZip does)
+      if (Object.keys(entries).length > 0) {
+        const metaJson = JSON.stringify({ mimes: metaMap });
+        entries['.hashfs_meta.json'] = encoder.encode(metaJson);
+      }
+
+      // Calculate what the ZIP export size would be (entries compressed at level 9)
+      const zipData = compress.zip(entries, { level: 9 });
+      vaultCompressedSize = zipData.length;
+
+      return { vaultSize, vaultCompressedSize };
+    };
+
+    const sizes = await calculateVaultSizes();
+    Object.assign(metadata, sizes);
     auth = true;
+
+    chainManager = chains.create();
 
     // Generate vault fingerprint
     const vaultData = new Uint8Array(64);
@@ -206,7 +258,9 @@ const vault = {
       size: meta.lastSize || 0, compressedSize: meta.lastCompressedSize || 0,
       modified: meta.lastModified || 0
     }))
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => a.name.localeCompare(b.name)),
+
+  getVaultSizes: () => ({ vaultSize: metadata.vaultSize, vaultCompressedSize: metadata.vaultCompressedSize })
 };
 
 // ==============
@@ -471,26 +525,7 @@ const ops = {
 
   // Import/Export operations
   async exportZip(operationId) {
-    const [entries, metaMap] = [{}, {}];
-    const items = Object.entries(metadata.files);
-
-    for (let i = 0; i < items.length; i++) {
-      const [name, meta] = items[i];
-      if (meta.activeKey) {
-        try {
-          const encrypted = await db.get('files', meta.activeKey);
-          const content = await compress.inflate(await crypto.decrypt(encrypted, keys.encKey));
-          entries[name] = new Uint8Array(content);
-          metaMap[name] = meta.mime || 'application/octet-stream';
-        } catch (e) {
-          console.warn(`Export ZIP failed for ${name}:`, e);
-        }
-      }
-
-      if (operationId) {
-        self.postMessage({ type: 'progress', operationId, completed: i + 1, total: items.length, current: name });
-      }
-    }
+    const { entries, metaMap } = await this.prepareExportEntries();
 
     try {
       entries['.hashfs_meta.json'] = encoder.encode(JSON.stringify({ mimes: metaMap }));
@@ -498,7 +533,26 @@ const ops = {
       console.warn('Failed to encode export metadata:', e);
     }
 
-    return compress.zip(entries, { level: 6 });
+    return compress.zip(entries, { level: 9 });
+  },
+
+  async prepareExportEntries() {
+    const [entries, metaMap] = [{}, {}];
+
+    for (const [name, meta] of Object.entries(metadata.files)) {
+      if (meta.activeKey) {
+        try {
+          const encrypted = await db.get('files', meta.activeKey);
+          const content = await compress.inflate(await crypto.decrypt(encrypted, keys.encKey));
+          entries[name] = new Uint8Array(content);
+          metaMap[name] = meta.mime || 'application/octet-stream';
+        } catch (e) {
+          console.warn(`Export preparation failed for ${name}:`, e);
+        }
+      }
+    }
+
+    return { entries, metaMap };
   },
 
   async importZip(arrayBuffer, operationId) {
@@ -590,7 +644,8 @@ const handlers = {
   'export-zip': data => ops.exportZip(data?.operationId),
   'import-zip': data => ops.importZip(data.arrayBuffer, data?.operationId),
   'import-files': data => ops.importFiles(data.files, data?.operationId),
-  'get-files': () => vault.getFileList()
+  'get-files': () => vault.getFileList(),
+  'get-vault-sizes': () => vault.getVaultSizes()
 };
 
 self.onmessage = async ({ data: { id, type, data } }) => {

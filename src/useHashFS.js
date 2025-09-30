@@ -24,6 +24,8 @@ export function useHashFS(passphrase, options = {}) {
   const loading = ref(false);
   const fileInstances = globalFileInstances;
 
+  const vaultSizes = ref({ vaultSize: 0, vaultCompressedSize: 0 });
+
   const stats = computed(() => {
     const totalSize = state.files.value.reduce((sum, f) => sum + f.size, 0);
     const compressedSize = state.files.value.reduce((sum, f) => sum + f.compressedSize, 0);
@@ -34,9 +36,21 @@ export function useHashFS(passphrase, options = {}) {
       totalSize,
       compressedSize,
       compressionRatio,
-      estimatedDbSize: compressedSize * 1.3
+      actualVaultSize: vaultSizes.value.vaultSize,
+      actualCompressedSize: vaultSizes.value.vaultCompressedSize
     };
   });
+
+  // Get vault sizes from worker (actual IndexedDB size vs estimated)
+  async function getVaultSizes() {
+    try {
+      const sizes = await WM().sendToWorker('get-vault-sizes');
+      return sizes || { vaultSize: 0, vaultCompressedSize: 0 };
+    } catch (error) {
+      console.warn('Failed to get vault sizes:', error);
+      return { vaultSize: 0, vaultCompressedSize: 0 };
+    }
+  }
 
   async function init() {
     if (!String(passphrase || '').trim()) return;
@@ -68,6 +82,14 @@ export function useHashFS(passphrase, options = {}) {
       if (result.success) {
         state.auth.value = true;
         state.files.value = result.files || [];
+
+        // Get actual vault sizes from worker
+        try {
+          const sizes = await getVaultSizes();
+          vaultSizes.value = sizes;
+        } catch (error) {
+          console.warn('Failed to get vault sizes after init:', error);
+        }
       } else {
         throw new Error(result.error || 'Authentication failed');
       }
@@ -212,6 +234,7 @@ export function useHashFS(passphrase, options = {}) {
     exportZip,
     importZip,
     downloadVault,
+    getVaultSizes,
   };
 }
 
