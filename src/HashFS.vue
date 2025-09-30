@@ -378,17 +378,20 @@ onBeforeUnmount(async () => {
 
         .text-xs.text-stone-500.space-y-1(v-if="hasFiles")
           .flex.justify-between
-            span Original:
+            span Uncompressed size:
             span.font-mono {{ formatSize(stats.totalSize) }}
           .flex.justify-between
-            span Compressed:
+            span Compressed size:
             span.font-mono {{ formatSize(stats.actualCompressedSize || stats.compressedSize) }}
-          .flex.justify-between
-            span Vault size:
-            span.font-mono.font-medium {{ formatSize(stats.actualVaultSize) }}
+
           .flex.justify-between(v-if="stats.totalSize > 0")
-            span Saved:
+            span Space saved:
             span.font-mono.text-green-600 {{ ((stats.totalSize - (stats.actualCompressedSize || stats.compressedSize)) / stats.totalSize * 100).toFixed(1) }}%
+
+          .flex.justify-between
+            span Database size:
+            span.font-mono.font-medium {{ formatSize(stats.actualVaultSize) }}
+
 
       .p-3.max-h-60svh.overflow-y-auto
         .space-y-2(v-if="hasFiles")
