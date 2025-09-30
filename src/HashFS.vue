@@ -378,7 +378,7 @@ onBeforeUnmount(async () => {
 
         .text-xs.text-stone-500.space-y-1(v-if="hasFiles")
           .flex.justify-between
-            span Uncompressed size:
+            span Content size:
             span.font-mono {{ formatSize(stats.totalSize) }}
           .flex.justify-between
             span Compressed size:
