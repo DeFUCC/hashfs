@@ -212,6 +212,9 @@ await vault.exportZip(onProgress); // Export vault contents as a zip (Uint8Array
 await vault.importZip(arrayBuffer, onProgress); // Import vault contents from zip
 await vault.downloadVault(filename, onProgress); // Trigger browser download of vault zip
 await vault.getVaultSizes(); // Get detailed vault size information
+
+await vault.wipeVault(); // Wipe vault and close
+
 vault.close(); // Close and terminate internal worker/session
 
 // Note: `useFile` is provided as a separate composable (re-exported by the package). Use `useFile(name, defaultContent)` to bind to a single file resource.
@@ -242,7 +245,7 @@ Saved: 72.5%
 ### Compression Behavior
 
 **Text Files** (Markdown, HTML, JSON):
-- Typically compress 50-70% (amazing ratios!)
+- Typically compress 70-90% (amazing ratios!)
 
 **Binary Files** (Images, PDFs, Videos):
 - Already compressed formats may show modest savings or slight growth

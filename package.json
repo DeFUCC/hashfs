@@ -1,6 +1,6 @@
 {
 	"name": "hashfs",
-	"version": "0.2.11",
+	"version": "0.2.12",
 	"description": "Content-addressed secure file storage in a browser tab",
 	"type": "module",
 	"homepage": "https://hashfs.js.org/",
