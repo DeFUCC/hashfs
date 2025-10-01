@@ -407,7 +407,7 @@ onBeforeUnmount(async () => {
             span.font-mono.text-green-600 {{ ((stats.totalSize - (stats.actualCompressedSize || stats.compressedSize)) / stats.totalSize * 100).toFixed(1) }}%
 
           .flex.justify-between
-            span Database size:
+            span Encrypted size:
             span.font-mono.font-medium {{ formatSize(stats.actualVaultSize) }}
 
 

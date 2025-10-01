@@ -238,7 +238,7 @@ HashFS provides three distinct size measurements to help you understand your sto
 Files (8)
 Original: 2.9 MB           ← Current file contents
 Compressed: 803.0 KB       ← ZIP export size (72.5% smaller!)
-Vault size: 10.9 MB        ← Full IndexedDB storage
+Vault size: 10.9 MB        ← Full encrypted IndexedDB storage
 Saved: 72.5%
 ```
 
