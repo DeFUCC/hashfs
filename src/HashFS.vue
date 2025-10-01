@@ -384,9 +384,9 @@ onBeforeUnmount(async () => {
       span {{ progressInfo.completed }} / {{ progressInfo.total }}
 
   //- Main Content
-  .flex.flex-wrap.gap-2.flex-auto(v-if="auth")
+  .grid.grid-cols-1.gap-2.sm-grid-cols-2(v-if="auth")
     //- Sidebar - File List
-    .bg-stone-50.rounded-lg.border.border-stone-200(style="flex: 1 1 100px")
+    .bg-stone-50.rounded-lg.border.border-stone-200
       .p-4.border-b.border-stone-200.bg-white.rounded-t-lg
         .flex.items-center.justify-between.mb-2
           h3.m-0.font-semibold.text-stone-800 Files ({{ files.length }})
@@ -450,7 +450,7 @@ onBeforeUnmount(async () => {
           p.text-xs.text-stone-400 Create a new file or drop files here
 
     //- Editor Area
-    .bg-white.rounded-lg.border.border-stone-200.flex.flex-col.min-h-80svh(style="flex: 1 1 220px")
+    .bg-white.rounded-lg.border.border-stone-200.flex.flex-col.min-h-80svh
       //- Editor Header
       .flex.items-center.justify-between.border-b.border-stone-200.p-4(v-if="currentFile && availableVersions?.max > 1")
         .flex.items-center.gap-2.w-full.flex-wrap
