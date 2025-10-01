@@ -588,13 +588,16 @@ const ops = {
 
       try {
         const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-        results.push({
-          name: filepath, success: true,
-          data: {
-            filename: filepath, mime: metaMap[filepath] || 'application/octet-stream',
-            bytes: bytes.buffer, size: bytes.length
-          }
+        const result = await ops.save(filepath, {
+          bytes,
+          mime: metaMap[filepath] || 'application/octet-stream'
         });
+
+        if (result.success) {
+          results.push({ name: filepath, success: true });
+        } else {
+          results.push({ name: filepath, success: false, error: result.error });
+        }
       } catch (err) {
         results.push({ name: filepath, success: false, error: err.message });
       }
@@ -604,7 +607,9 @@ const ops = {
       }
     }
 
-    return results;
+
+    const files = await vault.getFileList();
+    return { results, files };
   },
 
   async importFiles(files, operationId) {

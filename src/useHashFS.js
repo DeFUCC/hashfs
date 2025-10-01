@@ -161,28 +161,14 @@ export function useHashFS(passphrase, options = {}) {
     if (onProgress) { state.progressHandlers.set(operationId, [onProgress]); }
 
     try {
-      const items = await WM().sendToWorker('import-zip', { arrayBuffer, operationId });
+      const { results, files } = await WM().sendToWorker('import-zip', { arrayBuffer, operationId });
 
-      const saveResults = [];
-      for (const item of items) {
-        if (item.success) {
-          try {
-            const res = await WM().sendToWorker('save', item.data);
-            if (res.success) {
-              saveResults.push({ name: item.name, success: true });
-              if (res.files) state.files.value = res.files;
-            } else {
-              saveResults.push({ name: item.name, success: false, error: res.error });
-            }
-          } catch (err) {
-            saveResults.push({ name: item.name, success: false, error: err.message });
-          }
-        } else {
-          saveResults.push(item);
-        }
+      // Update files list if we received it
+      if (files) {
+        state.files.value = files;
       }
 
-      return saveResults;
+      return results;
     } finally {
       if (onProgress) state.progressHandlers.delete(operationId);
     }
