@@ -128,49 +128,7 @@ const vault = {
 
     metadata.files = await this.loadMetadata();
 
-    // Calculate vault sizes
-    const calculateVaultSizes = async () => {
-      let vaultSize = 0;
-      let vaultCompressedSize = 0;
-
-      // Calculate full vault size (all IndexedDB stores)
-      for (const storeName of ['files', 'meta', 'chains', 'integrity']) {
-        try {
-          const allKeys = await db.getAllKeys(storeName);
-          for (const key of allKeys) {
-            const data = await db.get(storeName, key);
-            if (data) {
-              // Account for encrypted data size plus key overhead
-              if (data instanceof Uint8Array) {
-                vaultSize += data.length;
-              } else if (data && typeof data === 'object') {
-                // For complex objects, estimate serialized size
-                vaultSize += JSON.stringify(data).length;
-              }
-            }
-          }
-        } catch (error) {
-          console.warn(`Failed to calculate size for store ${storeName}:`, error);
-        }
-      }
-
-      // Calculate compressed size (latest versions only, no chains)
-      const { entries, metaMap } = await ops.prepareExportEntries();
-
-      // Add metadata to entries (same as exportZip does)
-      if (Object.keys(entries).length > 0) {
-        const metaJson = JSON.stringify({ mimes: metaMap });
-        entries['.hashfs_meta.json'] = encoder.encode(metaJson);
-      }
-
-      // Calculate what the ZIP export size would be (entries compressed at level 9)
-      const zipData = compress.zip(entries, { level: 9 });
-      vaultCompressedSize = zipData.length;
-
-      return { vaultSize, vaultCompressedSize };
-    };
-
-    const sizes = await calculateVaultSizes();
+    const sizes = await this.calculateVaultSizes();
     Object.assign(metadata, sizes);
     auth = true;
 
@@ -192,6 +150,47 @@ const vault = {
       files: this.getFileList(),
       messageHash: { base: baseHash, session: crypto.hash(sessionData) }
     };
+  },
+
+  async calculateVaultSizes() {
+    let vaultSize = 0;
+    let vaultCompressedSize = 0;
+
+    // Calculate full vault size (all IndexedDB stores)
+    for (const storeName of ['files', 'meta', 'chains', 'integrity']) {
+      try {
+        const allKeys = await db.getAllKeys(storeName);
+        for (const key of allKeys) {
+          const data = await db.get(storeName, key);
+          if (data) {
+            // Account for encrypted data size plus key overhead
+            if (data instanceof Uint8Array) {
+              vaultSize += data.length;
+            } else if (data && typeof data === 'object') {
+              // For complex objects, estimate serialized size
+              vaultSize += JSON.stringify(data).length;
+            }
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to calculate size for store ${storeName}:`, error);
+      }
+    }
+
+    // Calculate compressed size (latest versions only, no chains)
+    const { entries, metaMap } = await ops.prepareExportEntries();
+
+    // Add metadata to entries (same as exportZip does)
+    if (Object.keys(entries).length > 0) {
+      const metaJson = JSON.stringify({ mimes: metaMap });
+      entries['.hashfs_meta.json'] = encoder.encode(metaJson);
+    }
+
+    // Calculate what the ZIP export size would be (entries compressed at level 9)
+    const zipData = compress.zip(entries, { level: 9 });
+    vaultCompressedSize = zipData.length;
+
+    return { vaultSize, vaultCompressedSize };
   },
 
   async loadMetadata() {
@@ -260,7 +259,11 @@ const vault = {
     }))
     .sort((a, b) => a.name.localeCompare(b.name)),
 
-  getVaultSizes: () => ({ vaultSize: metadata.vaultSize, vaultCompressedSize: metadata.vaultCompressedSize })
+  getVaultSizes: async () => {
+    const sizes = await vault.calculateVaultSizes();
+    Object.assign(metadata, sizes);
+    return sizes
+  }
 };
 
 // ==============
@@ -628,6 +631,34 @@ const ops = {
     }
 
     return results;
+  },
+
+  async wipe() {
+    if (!auth) throw new Error('Not authenticated');
+
+    // Close current database connection
+    if (db) {
+      db.close();
+    }
+
+    // Delete the entire database
+    await new Promise((resolve, reject) => {
+      const deleteReq = indexedDB.deleteDatabase(keys.dbName);
+      deleteReq.onsuccess = () => resolve();
+      deleteReq.onerror = () => reject(new Error('Failed to delete database'));
+      deleteReq.onblocked = () => reject(new Error('Database deletion blocked'));
+    });
+
+    // Reset all global state
+    auth = false;
+    keys = null;
+    db = null;
+    chainManager = null;
+    metadata.vaultSize = 0;
+    metadata.vaultCompressedSize = 0;
+    metadata.files = {};
+
+    return { success: true, message: 'Database wiped successfully' };
   }
 };
 
@@ -645,7 +676,8 @@ const handlers = {
   'import-zip': data => ops.importZip(data.arrayBuffer, data?.operationId),
   'import-files': data => ops.importFiles(data.files, data?.operationId),
   'get-files': () => vault.getFileList(),
-  'get-vault-sizes': () => vault.getVaultSizes()
+  'get-vault-sizes': () => vault.getVaultSizes(),
+  'wipe': () => ops.wipe()
 };
 
 self.onmessage = async ({ data: { id, type, data } }) => {

@@ -41,10 +41,10 @@ export function useHashFS(passphrase, options = {}) {
     };
   });
 
-  // Get vault sizes from worker (actual IndexedDB size vs estimated)
   async function getVaultSizes() {
     try {
       const sizes = await WM().sendToWorker('get-vault-sizes');
+      vaultSizes.value = sizes
       return sizes || { vaultSize: 0, vaultCompressedSize: 0 };
     } catch (error) {
       console.warn('Failed to get vault sizes:', error);
@@ -83,10 +83,8 @@ export function useHashFS(passphrase, options = {}) {
         state.auth.value = true;
         state.files.value = result.files || [];
 
-        // Get actual vault sizes from worker
         try {
-          const sizes = await getVaultSizes();
-          vaultSizes.value = sizes;
+          await getVaultSizes();
         } catch (error) {
           console.warn('Failed to get vault sizes after init:', error);
         }
@@ -155,6 +153,8 @@ export function useHashFS(passphrase, options = {}) {
     }
   }
 
+
+
   async function importZip(arrayBuffer, onProgress = null) {
     const operationId = 'importzip_' + Date.now();
 
@@ -207,6 +207,16 @@ export function useHashFS(passphrase, options = {}) {
     });
   }
 
+  async function wipeVault() {
+    await WM().sendToWorker('wipe');
+    state.auth.value = false;
+    state.files.value = [];
+    state.fileBuffers.clear();
+    state.progressHandlers.clear();
+    state.workerManager = null;
+  }
+
+
   async function downloadVault(filename = 'vault.zip', onProgress = null) {
     try {
       const zipped = await exportZip(onProgress);
@@ -230,6 +240,7 @@ export function useHashFS(passphrase, options = {}) {
     stats,
     loading,
     close,
+    wipeVault,
     importAll,
     exportZip,
     importZip,

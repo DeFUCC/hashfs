@@ -8,7 +8,7 @@ const props = defineProps({
 })
 
 const {
-  auth, files, stats, loading, close, importAll, exportZip, importZip, downloadVault
+  auth, files, stats, loading, close, importAll, wipeVault, exportZip, importZip, downloadVault, getVaultSizes
 } = useHashFS(props.passphrase)
 
 const selectedFile = ref('')
@@ -293,13 +293,23 @@ function handleKeydown(e) {
   }
 }
 
+async function wipe() {
+  if (window.prompt('Type "wipe" to wipe vault') !== 'wipe') return;
+  await wipeVault();
+  window.location.reload();
+}
+
+async function refreshSizes() {
+  await getVaultSizes();
+}
+
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
 })
 
 onBeforeUnmount(async () => {
   window.removeEventListener('keydown', handleKeydown)
-  await close()
+  close()
 })
 </script>
 
@@ -352,11 +362,16 @@ onBeforeUnmount(async () => {
         )
 
       button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.text-sm.font-medium(
-        v-if="hasFiles"
+        :disabled="loading || !hasFiles"
         @click="handleExportZip"
-        :disabled="loading"
         title="Download vault as ZIP"
       ) 📦 Download ZIP
+
+      button.px-3.py-2.rounded.border.border-stone-300.bg-white.text-red-500.hover-bg-red-200.transition.text-sm.font-medium(
+        @click="wipe()"
+        :disabled="loading"
+        title="Wipe vault"
+      ) 🗑️ Wipe
 
   //- Progress Bar
   .mb-4(v-if="progressInfo")
@@ -369,13 +384,16 @@ onBeforeUnmount(async () => {
       span {{ progressInfo.completed }} / {{ progressInfo.total }}
 
   //- Main Content
-  .grid.grid-cols-2.gap-2.flex-auto(v-if="auth")
+  .flex.flex-wrap.gap-2.flex-auto(v-if="auth")
     //- Sidebar - File List
-    .bg-stone-50.rounded-lg.border.border-stone-200
+    .bg-stone-50.rounded-lg.border.border-stone-200(style="flex: 1 1 100px")
       .p-4.border-b.border-stone-200.bg-white.rounded-t-lg
         .flex.items-center.justify-between.mb-2
           h3.m-0.font-semibold.text-stone-800 Files ({{ files.length }})
-
+          .flex-1 
+          button.px-1.flex.items-center.gap-2.rounded.border.border-stone-300.bg-white.text-stone-700.hover-bg-stone-50.transition.font-medium(@click="refreshSizes") 
+            span.text-xl 🔄
+            span.text-xs Refresh
         .text-xs.text-stone-500.space-y-1(v-if="hasFiles")
           .flex.justify-between
             span Content size:
@@ -432,7 +450,7 @@ onBeforeUnmount(async () => {
           p.text-xs.text-stone-400 Create a new file or drop files here
 
     //- Editor Area
-    .bg-white.rounded-lg.border.border-stone-200.flex.flex-col
+    .bg-white.rounded-lg.border.border-stone-200.flex.flex-col.min-h-80svh(style="flex: 1 1 220px")
       //- Editor Header
       .flex.items-center.justify-between.border-b.border-stone-200.p-4(v-if="currentFile && availableVersions?.max > 1")
         .flex.items-center.gap-2.w-full.flex-wrap
